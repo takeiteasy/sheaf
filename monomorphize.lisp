@@ -518,7 +518,8 @@ and erase type-class dictionaries. ROOT must have a ground type."
 (defun check-monomorphic (specialized)
   "Signal an error unless every binding of SPECIALIZED is ground, holds no
 dictionary or class method, and passes Coalton's node typechecker."
-  (let ((*classes* (class-table)))
+  (let ((*classes* (class-table))
+        (env (specialized-environment specialized)))
     (maphash
      (lambda (name node)
        (flet ((fail (control &rest args)
@@ -540,6 +541,6 @@ dictionary or class method, and passes Coalton's node typechecker."
              (when (method-p (ast:node-variable-value n))
                (fail "the class method ~s is left" (ast:node-variable-value n)))
              (values))))
-         (typecheck:typecheck-node node entry:*global-environment*)))
+         (typecheck:typecheck-node node env)))
      (specialized-bindings specialized))
     t))

@@ -30,6 +30,8 @@
    #:specialized-origin
    #:monomorphize
    #:defunctionalize
+   #:check-defunctionalized
+   #:recursive-types
    #:check-monomorphic))
 
 (defpackage #:sheaf/generated

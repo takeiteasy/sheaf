@@ -5,6 +5,8 @@
   (:shadow #:run)
   (:local-nicknames
    (#:ast #:coalton-impl/codegen/ast)
+   (#:codegen-type-definition #:coalton-impl/codegen/codegen-type-definition)
+   (#:pattern #:coalton-impl/codegen/pattern)
    (#:entry #:coalton-impl/entry)
    (#:settings #:coalton-impl/settings)
    (#:tc #:coalton-impl/typechecker)

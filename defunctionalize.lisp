@@ -43,8 +43,13 @@
 
 (defstruct (data-shape (:include shape))
   "A data type holding function values. CTORS pairs each constructor with the
-shapes of its fields."
-  args ctors)
+shapes of its fields. Unified shapes share a root through PARENT."
+  args ctors (parent nil))
+
+(defun find-data (shape)
+  (loop :while (data-shape-parent shape)
+        :do (setf shape (data-shape-parent shape)))
+  shape)
 
 (defun find-cls (cls)
   (loop :while (cls-parent cls)
@@ -87,10 +92,14 @@ shapes of its fields."
       (data-shape
        (unless (data-shape-p b)
          (error "Cannot unify ~a with ~a" (tc:type-to-string (shape-ty a)) (tc:type-to-string (shape-ty b))))
-       (mapc #'unify-shapes (data-shape-args a) (data-shape-args b))
-       (loop :for (nil . fields-a) :in (data-shape-ctors a)
-             :for (nil . fields-b) :in (data-shape-ctors b)
-             :do (mapc #'unify-shapes fields-a fields-b))))))
+       (let ((root-a (find-data a))
+             (root-b (find-data b)))
+         (unless (eq root-a root-b)
+           (setf (data-shape-parent root-a) root-b))
+         (mapc #'unify-shapes (data-shape-args a) (data-shape-args b))
+         (loop :for (nil . fields-a) :in (data-shape-ctors a)
+               :for (nil . fields-b) :in (data-shape-ctors b)
+               :do (mapc #'unify-shapes fields-a fields-b)))))))
 
 (defun shape-has-fn-p (shape)
   (not (atom-shape-p shape)))
@@ -108,12 +117,15 @@ shapes of its fields."
                  (fn-shape-ret new) (copy-shape (fn-shape-ret shape) memo))
            new))
         (data-shape
-         (let ((new (make-data-shape :ty (shape-ty shape))))
-           (setf (gethash shape memo) new
-                 (data-shape-args new) (copy-shapes (data-shape-args shape) memo)
-                 (data-shape-ctors new) (loop :for (ctor . fields) :in (data-shape-ctors shape)
-                                              :collect (cons ctor (copy-shapes fields memo))))
-           new)))))
+         (let* ((root (find-data shape))
+                (new (or (gethash root memo)
+                         (let ((new (make-data-shape :ty (shape-ty root))))
+                           (setf (gethash root memo) new
+                                 (data-shape-args new) (copy-shapes (data-shape-args root) memo)
+                                 (data-shape-ctors new) (loop :for (ctor . fields) :in (data-shape-ctors root)
+                                                              :collect (cons ctor (copy-shapes fields memo))))
+                           new))))
+           (setf (gethash shape memo) new))))))
 
 (defun copy-shapes (shapes memo)
   (mapcar (lambda (shape) (copy-shape shape memo)) shapes))
@@ -656,13 +668,14 @@ to; they are rebuilt where used, so are not captured."
                          #'< :key (lambda (entry) (lam-id (car entry)))))
              ctype))))
     (data-shape
-     (or (gethash shape *data-memo*)
-         (let ((ctype (make-data-ctype :source (shape-ty shape))))
-           (setf (gethash shape *data-memo*) ctype
-                 (data-ctype-args ctype) (mapcar #'materialize (data-shape-args shape))
-                 (data-ctype-ctors ctype) (loop :for (ctor . fields) :in (data-shape-ctors shape)
-                                                :collect (cons ctor (mapcar #'materialize fields))))
-           ctype)))))
+     (let ((root (find-data shape)))
+       (or (gethash root *data-memo*)
+           (let ((ctype (make-data-ctype :source (shape-ty root))))
+             (setf (gethash root *data-memo*) ctype
+                   (data-ctype-args ctype) (mapcar #'materialize (data-shape-args root))
+                   (data-ctype-ctors ctype) (loop :for (ctor . fields) :in (data-shape-ctors root)
+                                                  :collect (cons ctor (mapcar #'materialize fields))))
+             ctype))))))
 
 (defvar *bound*)
 
@@ -681,12 +694,14 @@ to; they are rebuilt where used, so are not captured."
              (when entry
                (mapc #'bind-ctype (lcase-captures lcase) (cdr entry))))))))
     (data-shape
-     (unless (gethash shape *bound*)
-       (setf (gethash shape *bound*) t)
-       (mapc #'bind-ctype (data-shape-args shape) (data-ctype-args ctype))
-       (loop :for (nil . fields) :in (data-shape-ctors shape)
-             :for (nil . ctype-fields) :in (data-ctype-ctors ctype)
-             :do (mapc #'bind-ctype fields ctype-fields))))))
+     (let ((root (find-data shape)))
+       (unless (gethash root *bound*)
+         (setf (gethash root *bound*) t
+               (gethash root *data-memo*) ctype)
+         (mapc #'bind-ctype (data-shape-args root) (data-ctype-args ctype))
+         (loop :for (nil . fields) :in (data-shape-ctors root)
+               :for (nil . ctype-fields) :in (data-ctype-ctors ctype)
+               :do (mapc #'bind-ctype fields ctype-fields)))))))
 
 (defun ctype-key (ctype deep &optional path)
   "A key equal for equal ctypes. DEEP also keys the arguments and results of
@@ -871,8 +886,6 @@ ctypes."
   (fn-type (mapcar #'ctype-ty (append captures args)) (ctype-ty ret)))
 
 ;;; Rewriting
-
-(defvar *group-bound* nil)
 
 (defun node-ctype (node)
   (materialize (gethash node *shapes*)))
@@ -1207,7 +1220,72 @@ lambdas that reach it, and every call through one by a match."
           :do (multiple-value-bind (node origin) (build-instance request)
                 (setf (gethash (inst-symbol request) (specialized-bindings result)) node
                       (gethash (inst-symbol request) (specialized-origins result))
-                      (list origin (ast:node-type node)))))
+                      (list (or (specialized-origin specialized origin) origin) (ast:node-type node)))))
     (setf (specialized-environment result) *env*
           (specialized-type-definitions result) (reverse *type-definitions*))
     result))
+
+(defun type-contains-function-p (type)
+  (etypecase type
+    (tc:function-ty t)
+    (tc:tapp (or (type-contains-function-p (tc:tapp-from type))
+                 (type-contains-function-p (tc:tapp-to type))))
+    ((or tc:tycon tc:tyvar) nil)
+    (tc:result-ty (some #'type-contains-function-p (tc:result-ty-output-types type)))))
+
+(defun check-defunctionalized (specialized)
+  "Signal an error unless SPECIALIZED passes `check-monomorphic` and holds no
+function value: no lambda but each binding's own, and no function-typed node but
+a global named in a call."
+  (check-monomorphic specialized)
+  (let ((entry:*global-environment* (specialized-environment specialized))
+        (*owns-function* (make-hash-table :test 'eq)))
+    (maphash
+     (lambda (name root)
+       (labels ((fail (control &rest args)
+                  (error "~s: ~?" name control args))
+                (check (node &optional allowed)
+                  (when (and (not allowed)
+                             (or (type-contains-function-p (ast:node-type node))
+                                 (type-mentions-function-p (ast:node-type node))))
+                    (fail "~a holds a function value" (tc:type-to-string (ast:node-type node))))
+                  (typecase node
+                    (ast:node-application
+                     (check (ast:node-application-rator node)
+                            (typep (ast:node-application-rator node) 'ast:node-global-variable))
+                     (mapc #'check (ast:node-application-rands node)))
+                    (ast:node-abstraction
+                     (fail "a lambda is left"))
+                    (t (mapc #'check (node-children node))))))
+         (if (typep root 'ast:node-abstraction)
+             (check (ast:node-abstraction-subexpr root))
+             (check root))))
+     (specialized-bindings specialized))
+    t))
+
+(defun recursive-types (specialized)
+  "The names of the synthesized types of SPECIALIZED that contain themselves, which
+no value of a fixed size can."
+  (let ((fields (make-hash-table :test 'eq))
+        (names '()))
+    (dolist (definition (specialized-type-definitions specialized))
+      (let ((name (tc:tycon-name (tc:type-definition-type definition))))
+        (push name names)
+        (setf (gethash name fields)
+              (loop :for scheme :in (tc:type-definition-constructor-types definition)
+                    :append (loop :for field :in (tc:function-type-arguments
+                                                  (tc:qualified-ty-type (tc:fresh-inst scheme)))
+                                  :collect (first (tc:flatten-type field)))))))
+    (flet ((reaches-itself-p (name)
+             (let ((seen '())
+                   (stack (mapcar #'tc:tycon-name (remove-if-not #'tc:tycon-p (gethash name fields)))))
+               (loop :while stack
+                     :do (let ((next (pop stack)))
+                           (when (eq next name) (return-from reaches-itself-p t))
+                           (unless (member next seen)
+                             (push next seen)
+                             (setf stack (append (mapcar #'tc:tycon-name
+                                                         (remove-if-not #'tc:tycon-p (gethash next fields)))
+                                                 stack)))))
+               nil)))
+      (remove-if-not #'reaches-itself-p (nreverse names)))))

@@ -19,5 +19,6 @@
   :serial t
   :components ((:file "package")
                (:file "ir")
-               (:file "monomorphize"))
+               (:file "monomorphize")
+               (:file "defunctionalize"))
   :perform (asdf:test-op (o c) (uiop:symbol-call '#:sheaf/tests '#:run)))

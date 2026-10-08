@@ -23,15 +23,21 @@
   "Compile SPECIALIZED to Lisp with Coalton's backend and call its root."
   ;; Raw Lisp from the stdlib, such as an assert, returns NIL where its type
   ;; says Unit, and Coalton's type annotations reject that.
-  (let* ((bindings (loop :for name :being :the :hash-keys :of (sheaf:specialized-bindings specialized)
+  (let* ((env (sheaf:specialized-environment specialized))
+         (entry:*global-environment* env)
+         (bindings (loop :for name :being :the :hash-keys :of (sheaf:specialized-bindings specialized)
                            :using (:hash-value node)
                          :collect (cons name node)))
+         (types (loop :for definition :in (sheaf:specialized-type-definitions specialized)
+                      :append (codegen-type-definition:codegen-type-definition definition env)))
          (forms (let ((settings:*emit-type-annotations* nil))
-                  (coalton-impl/codegen/program::compile-scc bindings entry:*global-environment*)))
-         (thunk (let ((*error-output* (make-broadcast-stream)))
-                  (compile nil `(lambda ()
-                                  ,@forms
-                                  (funcall ,(sheaf:specialized-root specialized)))))))
+                  (coalton-impl/codegen/program::compile-scc bindings env)))
+         (thunk (progn
+                  (mapc #'eval types)
+                  (let ((*error-output* (make-broadcast-stream)))
+                    (compile nil `(lambda ()
+                                    ,@forms
+                                    (funcall ,(sheaf:specialized-root specialized))))))))
     (funcall thunk)))
 
 (test specializations-are-monomorphic
