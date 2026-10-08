@@ -26,6 +26,11 @@
    #:specialized-bindings
    #:specialized-root
    #:specialized-environment
+   #:specialized-type-definitions
    #:specialized-origin
    #:monomorphize
+   #:defunctionalize
    #:check-monomorphic))
+
+(defpackage #:sheaf/generated
+  (:use))

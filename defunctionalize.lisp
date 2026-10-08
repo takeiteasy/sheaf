@@ -256,6 +256,7 @@ and RET shapes; a value has just RET."
 (defvar *binfos*)
 (defvar *lams*)
 (defvar *global-lams*)
+(defvar *group-lams*)
 
 (defun node-children (node)
   (etypecase node
@@ -408,7 +409,10 @@ its sets are then free to differ per use."
                                               :args params :ret ret)))
                     (add-case (fn-shape-cls shape) (make-lcase (global-lam name) '()))
                     shape))))))
-          ((constructor-p name) (infer-constructor node '()))
+          ((constructor-p name)
+           (when (typep (ast:node-type node) (quote tc:function-ty))
+             (unsupported "the constructor ~s used as a function" name))
+           (infer-constructor node '()))
           (t (let ((shape (shape-of (ast:node-type node))))
                (when (shape-has-fn-p shape)
                  (unsupported "~s, which has no code to analyze, holding a function" name))
@@ -520,9 +524,10 @@ to; they are rebuilt where used, so are not captured."
           :for shape :in shapes
           :do (let ((value (if (and recursive (member (car binding) group))
                                (let ((value (infer-lambda (cdr binding) env group group-free)))
-                                 (setf (gethash (cdr binding) *shapes*) value
-                                       (lam-self (lcase-lam (first (cls-cases (fn-shape-cls value)))))
-                                       (car binding))
+                                 (setf (gethash (cdr binding) *shapes*) value)
+                                 (let ((lam (gethash (cdr binding) *sites*)))
+                                   (setf (lam-self lam) (car binding)
+                                         (gethash (car binding) *group-lams*) lam))
                                  value)
                                (infer (cdr binding) env))))
                 (unify-shapes shape value)))
@@ -586,7 +591,7 @@ to; they are rebuilt where used, so are not captured."
         (make-binfo name node :value '() (shape-of (ast:node-type node))))))
 
 (defstruct (analysis (:constructor %make-analysis))
-  specialized shapes sites binfos lams global-lams)
+  specialized shapes sites binfos lams global-lams group-lams)
 
 (defun analyze (specialized)
   "Find the lambdas that reach every function-typed slot of SPECIALIZED."
@@ -597,6 +602,7 @@ to; they are rebuilt where used, so are not captured."
          (*binfos* (make-hash-table :test 'eq))
          (*lams* '())
          (*global-lams* (make-hash-table :test 'eq))
+         (*group-lams* (make-hash-table :test 'eq))
          (*owner* nil)
          (*at* nil)
          (bindings (specialized-bindings specialized)))
@@ -608,4 +614,600 @@ to; they are rebuilt where used, so are not captured."
       (dolist (name scc)
         (setf (binfo-state (gethash name *binfos*)) :done)))
     (%make-analysis :specialized specialized :shapes *shapes* :sites *sites*
-                    :binfos *binfos* :lams (reverse *lams*) :global-lams *global-lams*)))
+                    :binfos *binfos* :lams (reverse *lams*) :global-lams *global-lams*
+                    :group-lams *group-lams*)))
+
+;;; Concrete types
+;;;
+;;; Under an instance of a binding, each shape resolves to a ctype: the lambda
+;;; sets, now fixed, and the types they make.
+
+(defstruct (ctype (:constructor nil)))
+
+(defstruct (atom-ctype (:include ctype) (:constructor make-atom-ctype (ty)))
+  ty)
+
+(defstruct (fn-ctype (:include ctype))
+  "CASES pairs each lambda with the ctypes of its captures, in order of lambda."
+  cases args ret ty)
+
+(defstruct (data-ctype (:include ctype))
+  source args ctors ty)
+
+(defvar *mapping*)
+(defvar *fn-memo*)
+(defvar *data-memo*)
+
+(defun materialize (shape)
+  "The ctype of SHAPE under the current instance."
+  (etypecase shape
+    (atom-shape (make-atom-ctype (shape-ty shape)))
+    (fn-shape
+     (let ((root (find-cls (fn-shape-cls shape))))
+       (or (gethash root *mapping*)
+           (gethash root *fn-memo*)
+           (let ((ctype (make-fn-ctype)))
+             (setf (gethash root *fn-memo*) ctype
+                   (fn-ctype-args ctype) (mapcar #'materialize (fn-shape-args shape))
+                   (fn-ctype-ret ctype) (materialize (fn-shape-ret shape))
+                   (fn-ctype-cases ctype)
+                   (sort (loop :for lcase :in (cls-cases root)
+                               :collect (cons (lcase-lam lcase) (mapcar #'materialize (lcase-captures lcase))))
+                         #'< :key (lambda (entry) (lam-id (car entry)))))
+             ctype))))
+    (data-shape
+     (or (gethash shape *data-memo*)
+         (let ((ctype (make-data-ctype :source (shape-ty shape))))
+           (setf (gethash shape *data-memo*) ctype
+                 (data-ctype-args ctype) (mapcar #'materialize (data-shape-args shape))
+                 (data-ctype-ctors ctype) (loop :for (ctor . fields) :in (data-shape-ctors shape)
+                                                :collect (cons ctor (mapcar #'materialize fields))))
+           ctype)))))
+
+(defvar *bound*)
+
+(defun bind-ctype (shape ctype)
+  "Fix the lambda sets of SHAPE to those of CTYPE for the current instance."
+  (etypecase shape
+    (atom-shape)
+    (fn-shape
+     (let ((root (find-cls (fn-shape-cls shape))))
+       (unless (gethash root *mapping*)
+         (setf (gethash root *mapping*) ctype)
+         (mapc #'bind-ctype (fn-shape-args shape) (fn-ctype-args ctype))
+         (bind-ctype (fn-shape-ret shape) (fn-ctype-ret ctype))
+         (dolist (lcase (cls-cases root))
+           (let ((entry (assoc (lcase-lam lcase) (fn-ctype-cases ctype))))
+             (when entry
+               (mapc #'bind-ctype (lcase-captures lcase) (cdr entry))))))))
+    (data-shape
+     (unless (gethash shape *bound*)
+       (setf (gethash shape *bound*) t)
+       (mapc #'bind-ctype (data-shape-args shape) (data-ctype-args ctype))
+       (loop :for (nil . fields) :in (data-shape-ctors shape)
+             :for (nil . ctype-fields) :in (data-ctype-ctors ctype)
+             :do (mapc #'bind-ctype fields ctype-fields))))))
+
+(defun ctype-key (ctype deep &optional path)
+  "A key equal for equal ctypes. DEEP also keys the arguments and results of
+function types, which the lambda sets alone do not fix."
+  (etypecase ctype
+    (atom-ctype (type-key (atom-ctype-ty ctype)))
+    (ctype
+     (let ((position (position ctype path)))
+       (if position
+           (list :recur position)
+           (let ((path (cons ctype path)))
+             (flet ((keys (ctypes) (mapcar (lambda (c) (ctype-key c deep path)) ctypes)))
+               (etypecase ctype
+                 (fn-ctype
+                  (list* :fn
+                         (loop :for (lam . captures) :in (fn-ctype-cases ctype)
+                               :collect (cons (lam-id lam) (keys captures)))
+                         (and deep
+                              (list (keys (fn-ctype-args ctype)) (car (keys (list (fn-ctype-ret ctype))))))))
+                 (data-ctype
+                  (list :data (type-key (data-ctype-source ctype))
+                        (keys (data-ctype-args ctype))
+                        (loop :for (ctor . fields) :in (data-ctype-ctors ctype)
+                              :collect (cons ctor (keys fields)))))))))))))
+
+;;; Synthesized types
+
+(defstruct (tinfo (:constructor make-tinfo (name tycon)))
+  name tycon (ctors '()))
+
+(defvar *env*)
+(defvar *generation* 0)
+(defvar *generation-id*)
+(defvar *types*)
+(defvar *type-definitions*)
+(defvar *fallback-location*)
+
+(defun generated-symbol (control &rest args)
+  "A symbol of the package Coalton's generated code looks type and constructor
+names up in, unique to this run."
+  (intern (format nil "~a.~d" (apply #'format nil control args) *generation-id*) '#:sheaf/generated))
+
+(defun fn-type (args result)
+  (tc:make-function-type* args result))
+
+(defun define-type-info (info field-types location)
+  "Register the type INFO in the environment, with one constructor per entry of
+FIELD-TYPES, a list of the field types of each constructor."
+  (let* ((name (tinfo-name info))
+         (tycon (tinfo-tycon info))
+         (location (or location *fallback-location*))
+         (entries (loop :for ctor :in (tinfo-ctors info)
+                        :for fields :in field-types
+                        :collect (tc:make-constructor-entry
+                                  :name ctor :source-name (symbol-name ctor)
+                                  :arity (length fields) :constructs name
+                                  :classname (intern (format nil "~a/~a" name ctor) '#:sheaf/generated)
+                                  :docstring nil :compressed-repr nil)))
+         (schemes (loop :for fields :in field-types
+                        :collect (tc:to-scheme (tc:prepend-function-input-types fields tycon))))
+         (definition (tc:make-type-definition
+                      :name name :type tycon :runtime-type name :aliased-type nil
+                      :explicit-repr nil :enum-repr nil :newtype nil
+                      :constructors entries :constructor-types schemes
+                      :constructor-args field-types :docstring nil :location location
+                      :exception-p nil :resumption-p nil)))
+    (setf *env* (tc:set-type *env* name
+                             (tc:make-type-entry
+                              :name name :source-name (symbol-name name) :runtime-type name
+                              :type tycon :tyvars '() :variances '()
+                              :constructors (tinfo-ctors info)
+                              :explicit-repr nil :enum-repr nil :newtype nil
+                              :docstring nil :location location
+                              :exception-p nil :resumption-p nil)))
+    (loop :for entry :in entries
+          :for scheme :in schemes
+          :for ctor := (tc:constructor-entry-name entry)
+          :do (setf *env* (tc:set-constructor *env* ctor entry)
+                    *env* (tc:set-value-type *env* ctor scheme)
+                    *env* (tc:set-name *env* ctor (tc:make-name-entry
+                                                  :name ctor :type :constructor
+                                                  :docstring nil :location location)))
+              (when (plusp (tc:constructor-entry-arity entry))
+                (setf *env* (tc:set-function *env* ctor (tc:make-function-env-entry
+                                                        :name ctor :arity (tc:constructor-entry-arity entry)
+                                                        :inline-p nil)))))
+    (push definition *type-definitions*)
+    info))
+
+(defun new-type-info (key base)
+  (let* ((name (generated-symbol "~a~d" base (hash-table-count *types*)))
+         (info (make-tinfo name (tc:make-tycon :name name :kind tc:+kstar+))))
+    (setf (gethash key *types*) info)
+    info))
+
+(defun union-info (ctype)
+  (let ((key (list :union (ctype-key ctype nil))))
+    (or (gethash key *types*)
+        (let ((info (new-type-info key "FN")))
+          (setf (tinfo-ctors info)
+                (loop :for (lam) :in (fn-ctype-cases ctype)
+                      :collect (intern (format nil "~a/L~d" (tinfo-name info) (lam-id lam)) '#:sheaf/generated)))
+          (define-type-info info
+                            (loop :for (nil . captures) :in (fn-ctype-cases ctype)
+                                  :collect (mapcar #'ctype-ty captures))
+                            (loop :for (lam) :in (fn-ctype-cases ctype)
+                                  :thereis (and (lam-node lam) (ast:node-location (lam-node lam)))))
+          info))))
+
+(defun data-head (ctype)
+  (first (tc:flatten-type (data-ctype-source ctype))))
+
+(defun owning-data-p (ctype)
+  (tycon-owns-function-p (tc:tycon-name (data-head ctype))))
+
+(defun data-info (ctype)
+  "The synthesized type of a data type that holds functions itself."
+  (let ((key (list :owned (ctype-key ctype nil))))
+    (or (gethash key *types*)
+        (let ((info (new-type-info key (symbol-name (tc:tycon-name (data-head ctype))))))
+          (setf (tinfo-ctors info)
+                (loop :for (ctor) :in (data-ctype-ctors ctype)
+                      :collect (intern (format nil "~a/~a" (tinfo-name info) (symbol-name ctor)) '#:sheaf/generated)))
+          (define-type-info info
+                            (loop :for (nil . fields) :in (data-ctype-ctors ctype)
+                                  :collect (mapcar #'ctype-ty fields))
+                            nil)
+          info))))
+
+(defun ctype-ty (ctype)
+  (etypecase ctype
+    (atom-ctype (atom-ctype-ty ctype))
+    (fn-ctype (or (fn-ctype-ty ctype)
+                  (setf (fn-ctype-ty ctype) (tinfo-tycon (union-info ctype)))))
+    (data-ctype
+     (or (data-ctype-ty ctype)
+         (setf (data-ctype-ty ctype)
+               (if (owning-data-p ctype)
+                   (tinfo-tycon (data-info ctype))
+                   (tc:apply-type-argument-list (data-head ctype)
+                                                (mapcar #'ctype-ty (data-ctype-args ctype)))))))))
+
+(defun constructor-for (ctype constructor)
+  "CONSTRUCTOR as the data type CTYPE names it."
+  (if (and (data-ctype-p ctype) (owning-data-p ctype))
+      (nth (position constructor (data-ctype-ctors ctype) :key #'car)
+           (tinfo-ctors (data-info ctype)))
+      constructor))
+
+;;; Instances
+;;;
+;;; Every binding, and every lambda lifted out of one, is specialized once per
+;;; combination of lambda sets it is used with.
+
+(defstruct (inst (:constructor make-inst (kind target captures args ret symbol)))
+  kind target captures args ret symbol)
+
+(defvar *instances*)
+(defvar *queue*)
+(defvar *lam-context* nil
+  "The lambda whose body is being rewritten.")
+
+(defun request-instance (kind target captures args ret)
+  "The symbol of the instance of TARGET for the given capture, argument and result
+ctypes."
+  (let ((key (list kind
+                   (if (eq kind :lam) (lam-id target) (binfo-name target))
+                   (loop :for c :in captures :collect (ctype-key c t))
+                   (loop :for c :in args :collect (ctype-key c t))
+                   (ctype-key ret t))))
+    (or (car (gethash key *instances*))
+        (let ((symbol (make-symbol (format nil "~a{~d}"
+                                           (if (eq kind :lam)
+                                               (format nil "~a/L~d" (car (lam-owner target)) (lam-id target))
+                                               (binfo-name target))
+                                           (hash-table-count *instances*)))))
+          (setf (gethash key *instances*) (list symbol))
+          (push (make-inst kind target captures args ret symbol) *queue*)
+          symbol))))
+
+(defun instance-type (captures args ret)
+  (fn-type (mapcar #'ctype-ty (append captures args)) (ctype-ty ret)))
+
+;;; Rewriting
+
+(defvar *group-bound* nil)
+
+(defun node-ctype (node)
+  (materialize (gethash node *shapes*)))
+
+(defun group-reference-p (name)
+  (and *lam-context* (member name (lam-group *lam-context*))))
+
+(defun local-ref (name ctype location)
+  (ast:make-node-local-variable :type (ctype-ty ctype) :value name :location location))
+
+(defun construct-case (ctype lam captures location)
+  "The union value of CTYPE for LAM, built from the nodes CAPTURES."
+  (let* ((info (union-info ctype))
+         (position (position lam (fn-ctype-cases ctype) :key #'car))
+         (constructor (nth position (tinfo-ctors info)))
+         (ty (ctype-ty ctype)))
+    (if captures
+        (ast:make-node-direct-application
+         :type ty :location location :properties '()
+         :rator-type (fn-type (mapcar #'ast:node-type captures) ty)
+         :rator constructor :rands captures :keyword-rands '())
+        (ast:make-node-global-variable :type ty :value constructor :location location))))
+
+(defun capture-ref (name ctype location)
+  "A reference, inside a lifted body, to the captured or rebuilt variable NAME."
+  (if (group-reference-p name)
+      (reconstruct name ctype location)
+      (local-ref name ctype location)))
+
+(defun reconstruct (name ctype location)
+  "The closure bound to NAME, a recursive binding, rebuilt from the captures of
+the lambda being rewritten."
+  (let* ((lam (gethash name *group-lams*))
+         (entry (assoc lam (fn-ctype-cases ctype))))
+    (unless entry
+      (unsupported "the recursive binding ~s not reaching its own uses" name))
+    (construct-case ctype lam
+                    (loop :for free :in (lam-free lam)
+                          :for capture :in (cdr entry)
+                          :collect (local-ref free capture location))
+                    location)))
+
+(defun trivial-node-p (node)
+  (typep node '(or ast:node-literal ast:node-variable)))
+
+(defun with-bound (nodes function)
+  "Call FUNCTION with a trivial node for each of NODES, binding those that are
+not trivial around the result."
+  (let ((bindings '())
+        (refs '()))
+    (dolist (node nodes)
+      (if (trivial-node-p node)
+          (push node refs)
+          (let ((name (gensym "ARG")))
+            (push (cons name node) bindings)
+            (push (ast:make-node-local-variable :type (ast:node-type node) :value name
+                                                :location (ast:node-location node))
+                  refs))))
+    (let ((body (funcall function (nreverse refs))))
+      (dolist (binding bindings body)
+        (setf body (ast:make-node-bind :type (ast:node-type body) :location (ast:node-location (cdr binding))
+                                       :name (car binding) :expr (cdr binding) :body body))))))
+
+(defun dispatch (fn ctype args location)
+  "A call of the function value FN, a node of union type CTYPE, with the nodes ARGS."
+  (let ((cases (fn-ctype-cases ctype))
+        (result (fn-ctype-ret ctype))
+        (union (ctype-ty ctype)))
+    (when (null cases)
+      (unsupported "a call that no lambda reaches"))
+    (with-bound args
+      (lambda (args)
+        (flet ((call (lam captures cap-nodes)
+                 (let ((symbol (if (lam-target lam)
+                                   (request-instance :binding (gethash (lam-target lam) *binfos*)
+                                                     '() (fn-ctype-args ctype) result)
+                                   (request-instance :lam lam captures (fn-ctype-args ctype) result))))
+                   (ast:make-node-direct-application
+                    :type (ctype-ty result) :location location :properties '()
+                    :rator-type (instance-type captures (fn-ctype-args ctype) result)
+                    :rator symbol :rands (append cap-nodes args) :keyword-rands '()))))
+          (if (and (null (rest cases)) (null (cdr (first cases))) (trivial-node-p fn))
+              (call (car (first cases)) '() '())
+              (ast:make-node-match
+               :type (ctype-ty result) :location location :expr fn
+               :branches
+               (loop :for (lam . captures) :in cases
+                     :for constructor :in (tinfo-ctors (union-info ctype))
+                     :collect (let ((names (loop :for nil :in captures :collect (gensym "CAPTURE"))))
+                                (ast:make-match-branch
+                                 :pattern (pattern:make-pattern-constructor
+                                           :type union :name constructor
+                                           :patterns (loop :for name :in names
+                                                           :for capture :in captures
+                                                           :collect (pattern:make-pattern-var
+                                                                     :type (ctype-ty capture) :name name)))
+                                 :body (call lam captures
+                                             (loop :for name :in names
+                                                   :for capture :in captures
+                                                   :collect (local-ref name capture location)))))))))))))
+
+(defun rewrite-pattern (pattern)
+  (let* ((ctype (materialize (gethash pattern *shapes*)))
+         (ty (ctype-ty ctype)))
+    (etypecase pattern
+      (pattern:pattern-var (pattern:make-pattern-var :type ty :name (pattern:pattern-var-name pattern)))
+      (pattern:pattern-wildcard (pattern:make-pattern-wildcard :type ty))
+      (pattern:pattern-literal pattern)
+      (pattern:pattern-binding
+       (pattern:make-pattern-binding :type ty
+                                     :var (rewrite-pattern (pattern:pattern-binding-var pattern))
+                                     :pattern (rewrite-pattern (pattern:pattern-binding-pattern pattern))))
+      (pattern:pattern-constructor
+       (pattern:make-pattern-constructor
+        :type ty
+        :name (constructor-for ctype (pattern:pattern-constructor-name pattern))
+        :patterns (mapcar #'rewrite-pattern (pattern:pattern-constructor-patterns pattern)))))))
+
+(defun rewrite-variable (node)
+  (let ((name (ast:node-variable-value node))
+        (location (ast:node-location node)))
+    (cond ((group-reference-p name)
+           (reconstruct name (node-ctype node) location))
+          ((gethash name *binfos*)
+           (let ((binfo (gethash name *binfos*))
+                 (ctype (node-ctype node)))
+             (ecase (binfo-kind binfo)
+               (:function (construct-case ctype (global-lam-of name) '() location))
+               (:value (ast:make-node-global-variable
+                        :type (ctype-ty ctype) :location location
+                        :value (request-instance :binding binfo '() '() ctype))))))
+          ((constructor-p name)
+           (let ((ctype (node-ctype node)))
+             (ast:make-node-global-variable :type (ctype-ty ctype) :location location
+                                            :value (constructor-for ctype name))))
+          (t (ast:copy-node node (ctype-ty (node-ctype node)))))))
+
+(defun global-lam-of (name)
+  (gethash name *global-lams*))
+
+(defun rewrite-direct (node)
+  (let* ((name (ast:node-direct-application-rator node))
+         (site (gethash node *sites*))
+         (rands (mapcar #'rewrite (ast:node-direct-application-rands node)))
+         (ctype (node-ctype node))
+         (location (ast:node-location node)))
+    (cond ((fn-shape-p site)
+           (let ((callee (materialize site)))
+             (dispatch (if (group-reference-p name)
+                           (reconstruct name callee location)
+                           (local-ref name callee location))
+                       callee rands location)))
+          (site
+           (rewrite-global-call node name (car site) (cdr site) rands ctype location))
+          ((constructor-p name)
+           (let ((ty (ctype-ty ctype)))
+             (ast:make-node-direct-application
+              :type ty :location location
+              :properties (ast:node-direct-application-properties node)
+              :rator-type (fn-type (mapcar #'ast:node-type rands) ty)
+              :rator (constructor-for ctype name) :rands rands :keyword-rands '())))
+          (t
+           (ast:make-node-direct-application
+            :type (ctype-ty ctype) :location location
+            :properties (ast:node-direct-application-properties node)
+            :rator-type (fn-type (mapcar #'ast:node-type rands) (ctype-ty ctype))
+            :rator name :rands rands :keyword-rands '())))))
+
+(defun global-instance (name params ret)
+  "The instance symbol and type of the global NAME used with the shapes PARAMS and RET."
+  (let ((args (mapcar #'materialize params))
+        (result (materialize ret)))
+    (values (request-instance :binding (gethash name *binfos*) '() args result)
+            (instance-type '() args result))))
+
+(defun rewrite-global-call (node name params ret rands ctype location)
+  (declare (ignore node))
+  (multiple-value-bind (symbol type) (global-instance name params ret)
+    (ast:make-node-direct-application
+     :type (ctype-ty ctype) :location location :properties '()
+     :rator-type type :rator symbol :rands rands :keyword-rands '())))
+
+(defun rewrite-application (node)
+  (let* ((rator (ast:node-application-rator node))
+         (site (gethash node *sites*))
+         (rands (mapcar #'rewrite (ast:node-application-rands node)))
+         (ctype (node-ctype node))
+         (location (ast:node-location node))
+         (name (and (typep rator 'ast:node-variable) (ast:node-variable-value rator))))
+    (cond (site
+           (multiple-value-bind (symbol type) (global-instance name (car site) (cdr site))
+             (ast:make-node-application
+              :type (ctype-ty ctype) :location location :properties '()
+              :rator (ast:make-node-global-variable :type type :value symbol
+                                                    :location (ast:node-location rator))
+              :rands rands :keyword-rands '())))
+          ((and name (not (gethash name *binfos*)) (constructor-p name)
+                (not (gethash rator *shapes*)))
+           (let ((ty (ctype-ty ctype)))
+             (ast:make-node-application
+              :type ty :location location :properties '()
+              :rator (ast:make-node-global-variable
+                      :type (fn-type (mapcar #'ast:node-type rands) ty)
+                      :value (constructor-for ctype name) :location (ast:node-location rator))
+              :rands rands :keyword-rands '())))
+          (t
+           (let ((fn (rewrite rator)))
+             (dispatch fn (node-ctype rator) rands location))))))
+
+(defun rewrite-lambda (node)
+  (let* ((lam (gethash node *sites*))
+         (ctype (node-ctype node))
+         (captures (cdr (assoc lam (fn-ctype-cases ctype))))
+         (location (ast:node-location node)))
+    (construct-case ctype lam
+                    (loop :for name :in (lam-free lam)
+                          :for capture :in captures
+                          :collect (capture-ref name capture location))
+                    location)))
+
+(defun rewrite (node)
+  (let ((ty (lambda () (ctype-ty (node-ctype node))))
+        (location (ast:node-location node)))
+    (etypecase node
+      (ast:node-literal node)
+      (ast:node-variable (rewrite-variable node))
+      (ast:node-application (rewrite-application node))
+      (ast:node-direct-application (rewrite-direct node))
+      (ast:node-abstraction (rewrite-lambda node))
+      (ast:node-let
+       (ast:make-node-let :type (funcall ty) :location location
+                          :bindings (loop :for (name . value) :in (ast:node-let-bindings node)
+                                          :collect (cons name (rewrite value)))
+                          :subexpr (rewrite (ast:node-let-subexpr node))))
+      (ast:node-bind
+       (ast:make-node-bind :type (funcall ty) :location location
+                           :name (ast:node-bind-name node)
+                           :expr (rewrite (ast:node-bind-expr node))
+                           :body (rewrite (ast:node-bind-body node))))
+      (ast:node-seq
+       (ast:make-node-seq :type (funcall ty) :location location
+                          :nodes (mapcar #'rewrite (ast:node-seq-nodes node))))
+      (ast:node-locally
+       (ast:make-node-locally :type (funcall ty) :location location
+                              :noinline-functions (ast:node-locally-noinline-functions node)
+                              :type-check (ast:node-locally-type-check node)
+                              :subexpr (rewrite (ast:node-locally-subexpr node))))
+      (ast:node-match
+       (ast:make-node-match
+        :type (funcall ty) :location location
+        :expr (rewrite (ast:node-match-expr node))
+        :branches (loop :for branch :in (ast:node-match-branches node)
+                        :collect (ast:make-match-branch
+                                  :pattern (rewrite-pattern (ast:match-branch-pattern branch))
+                                  :body (rewrite (ast:match-branch-body branch))))))
+      (ast:node-lisp node))))
+
+;;; Driver
+
+(defun build-instance (request)
+  "The IR of the instance REQUEST asks for."
+  (let* ((*mapping* (make-hash-table :test 'eq))
+         (*fn-memo* (make-hash-table :test 'eq))
+         (*data-memo* (make-hash-table :test 'eq))
+         (*bound* (make-hash-table :test 'eq))
+         (target (inst-target request))
+         (args (inst-args request))
+         (ret (inst-ret request))
+         (captures (inst-captures request)))
+    (ecase (inst-kind request)
+      (:binding
+       (let* ((node (binfo-node target))
+              (*owner* (cons (binfo-name target) (ast:node-type node)))
+              (*lam-context* nil))
+         (ecase (binfo-kind target)
+           (:function
+            (mapc #'bind-ctype (binfo-params target) args)
+            (bind-ctype (binfo-ret target) ret)
+            (values (ast:make-node-abstraction
+                     :type (instance-type '() args ret) :location (ast:node-location node)
+                     :vars (ast:node-abstraction-vars node) :keyword-params '()
+                     :subexpr (rewrite (ast:node-abstraction-subexpr node)))
+                    (binfo-name target)))
+           (:value
+            (bind-ctype (binfo-ret target) ret)
+            (values (rewrite node) (binfo-name target))))))
+      (:lam
+       (let* ((node (lam-node target))
+              (*owner* (cons (car (lam-owner target)) (ast:node-type node)))
+              (*lam-context* target))
+         (mapc #'bind-ctype (lam-free-shapes target) captures)
+         (mapc #'bind-ctype (lam-params target) args)
+         (bind-ctype (lam-ret target) ret)
+         (values (ast:make-node-abstraction
+                  :type (instance-type captures args ret) :location (ast:node-location node)
+                  :vars (append (lam-free target) (ast:node-abstraction-vars node))
+                  :keyword-params '()
+                  :subexpr (rewrite (ast:node-abstraction-subexpr node)))
+                 (car (lam-owner target))))))))
+
+(defun defunctionalize (specialized)
+  "SPECIALIZED with every function value replaced by a tagged union of the
+lambdas that reach it, and every call through one by a match."
+  (let* ((analysis (analyze specialized))
+         (*shapes* (analysis-shapes analysis))
+         (*sites* (analysis-sites analysis))
+         (*binfos* (analysis-binfos analysis))
+         (*global-lams* (analysis-global-lams analysis))
+         (*group-lams* (analysis-group-lams analysis))
+         (*env* (specialized-environment specialized))
+         (*generation-id* (incf *generation*))
+         (*types* (make-hash-table :test 'equal))
+         (*type-definitions* '())
+         (*instances* (make-hash-table :test 'equal))
+         (*queue* '())
+         (*mapping* (make-hash-table :test 'eq))
+         (*fn-memo* (make-hash-table :test 'eq))
+         (*data-memo* (make-hash-table :test 'eq))
+         (*owns-function* (make-hash-table :test 'eq))
+         (*lam-context* nil)
+         (*owner* nil)
+         (*at* nil)
+         (root (gethash (specialized-root specialized) *binfos*))
+         (*fallback-location* (ast:node-location (binfo-node root)))
+         (result (%make-specialized)))
+    (setf (specialized-root result)
+          (request-instance :binding root '()
+                            (mapcar #'materialize (binfo-params root))
+                            (materialize (binfo-ret root))))
+    (loop :for request := (pop *queue*)
+          :while request
+          :do (multiple-value-bind (node origin) (build-instance request)
+                (setf (gethash (inst-symbol request) (specialized-bindings result)) node
+                      (gethash (inst-symbol request) (specialized-origins result))
+                      (list origin (ast:node-type node)))))
+    (setf (specialized-environment result) *env*
+          (specialized-type-definitions result) (reverse *type-definitions*))
+    result))
