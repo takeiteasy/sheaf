@@ -42,18 +42,23 @@
    #:check-lowered
    #:run-lowered
    #:walk-ir
+   #:assign-stacks
+   #:check-assigned
+   #:size-class
+   #:lowered-stack-count
    #:ir-type #:ir-type-kind #:ir-type-name #:ir-type-args
    #:ir-constructor #:ir-constructor-name #:ir-constructor-tag #:ir-constructor-fields
    #:ir-def #:ir-def-name #:ir-def-origin #:ir-def-kind #:ir-def-params
    #:ir-def-result #:ir-def-body #:ir-def-location
+   #:ir-def-source #:ir-def-destination #:ir-def-pool
    #:ir-node #:ir-node-type #:ir-node-location
    #:ir-atom
    #:ir-literal #:ir-literal-value
    #:ir-local #:ir-local-name
    #:ir-global #:ir-global-name
-   #:ir-let #:ir-let-name #:ir-let-value #:ir-let-body
-   #:ir-call #:ir-call-function #:ir-call-args
-   #:ir-construct #:ir-construct-constructor #:ir-construct-args
+   #:ir-let #:ir-let-name #:ir-let-value #:ir-let-body #:ir-let-stack
+   #:ir-call #:ir-call-function #:ir-call-args #:ir-call-destination #:ir-call-region
+   #:ir-construct #:ir-construct-constructor #:ir-construct-args #:ir-construct-stack
    #:ir-prim #:ir-prim-op #:ir-prim-args
    #:ir-foreign #:ir-foreign-vars #:ir-foreign-form
    #:ir-match #:ir-match-scrutinee #:ir-match-branches

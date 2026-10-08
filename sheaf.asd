@@ -12,6 +12,7 @@
                (:file "monomorphize")
                (:file "defunctionalize")
                (:file "lower")
+               (:file "stacks")
                (:file "interpret"))
   :in-order-to ((asdf:test-op (asdf:test-op #:sheaf/tests))))
 
@@ -23,5 +24,6 @@
                (:file "ir")
                (:file "monomorphize")
                (:file "defunctionalize")
-               (:file "lower"))
+               (:file "lower")
+               (:file "stacks"))
   :perform (asdf:test-op (o c) (uiop:symbol-call '#:sheaf/tests '#:run)))

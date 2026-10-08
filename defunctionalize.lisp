@@ -315,13 +315,12 @@ and RET shapes; a value has just RET."
 
 ;;; Bindings and their call graph
 
-(defun binding-sccs (bindings)
-  "The names of BINDINGS, a table of name to node, in strongly connected
-components, each after the ones it refers to."
+(defun strongly-connected-components (names successors)
+  "NAMES in strongly connected components, each after the ones it refers to.
+SUCCESSORS maps a name to the names it refers to."
   (let ((index 0) (stack '()) (info (make-hash-table :test 'eq)) (sccs '()))
     (labels ((edges (name)
-               (remove-if-not (lambda (ref) (nth-value 1 (gethash ref bindings)))
-                              (referenced-names (gethash name bindings))))
+               (funcall successors name))
              (visit (name)
                (let ((entry (list index index t)))
                  (setf (gethash name info) entry)
@@ -341,11 +340,18 @@ components, each after the ones it refers to."
                                (setf (third (gethash member info)) nil)
                            :until (eq member name))
                      (push scc sccs))))))
-      (maphash (lambda (name node)
-                 (declare (ignore node))
-                 (unless (gethash name info) (visit name)))
-               bindings))
+      (dolist (name names)
+        (unless (gethash name info) (visit name))))
     (nreverse sccs)))
+
+(defun binding-sccs (bindings)
+  "The names of BINDINGS, a table of name to node, in strongly connected
+components, each after the ones it refers to."
+  (strongly-connected-components
+   (loop :for name :being :the :hash-keys :of bindings :collect name)
+   (lambda (name)
+     (remove-if-not (lambda (ref) (nth-value 1 (gethash ref bindings)))
+                    (referenced-names (gethash name bindings))))))
 
 ;;; Inference
 

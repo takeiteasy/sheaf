@@ -1,8 +1,8 @@
 # Sheaf IR
 
 After defunctionalization, `lower` turns the program into Sheaf's own
-first-order IR in A-normal form. Root checking, data stack assignment and the C
-emitter ([MEMORY.md](MEMORY.md)) read this IR, so they never see Coalton's node
+first-order IR in A-normal form. Root checking, data stack assignment
+([STACKS.md](STACKS.md)) and the C emitter ([MEMORY.md](MEMORY.md)) read this IR, so they never see Coalton's node
 types or environment.
 
 ```lisp
@@ -51,6 +51,7 @@ enclosing node's.
 | `lowered-defs` | `ir-def`s: a `:function` with parameters, or a `:value`; each with its origin and location |
 | `lowered-types` | The constructors of every data type reached, in tag order, with field types |
 | `lowered-root` | The root's name |
+| `lowered-stack-count` | The stacks the program needs, once assigned ([STACKS.md](STACKS.md)); otherwise `nil` |
 
 A type is an `ir-type` of kind `:scalar`, `:data` or `:reference` (`Cell`,
 `Vector`, `Hashtable`), and equal types are the same object.
@@ -59,7 +60,7 @@ A type is an `ir-type` of kind `:scalar`, `:data` or `:reference` (`Cell`,
 |---|---|
 | `lower` | Lowers a defunctionalized program |
 | `check-lowered` | Signals an error unless names are bound, arities match and operands are atoms |
-| `run-lowered` | Evaluates the root; defines what a lowered program means |
+| `run-lowered` | Evaluates the root; defines what a lowered program means, on simulated stacks once assigned |
 | `walk-ir` | Visits every node, outermost first |
 
 ## Primitives

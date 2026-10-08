@@ -3,8 +3,8 @@
 Sheaf has no heap and no garbage collector. Every value lives on the native
 stack, in static data, or on one of a few **data stacks**, and memory is
 freed when the scope that owns it ends. The model follows
-[Goose](https://github.com/aardappel/goose)[^goose]. None of it is
-implemented yet; [STATUS.md](STATUS.md) says what runs.
+[Goose](https://github.com/aardappel/goose)[^goose]. Data stack assignment
+runs ([STACKS.md](STACKS.md)); roots do not yet ([STATUS.md](STATUS.md)).
 
 ## Data stacks
 
@@ -43,6 +43,10 @@ never writes a lifetime.
 A function returning a list builds that list straight into its caller's
 storage, with no copy.
 
+A recursive cycle builds everything in one region, owned by the call into the
+cycle and freed when it returns. Nothing is rejected for keeping a list across a
+recursive call, as Goose rejects it.
+
 ## Coalton's data
 
 Coalton's immutable data reads the same whether it is copied or shared, so
@@ -57,10 +61,9 @@ references.
   [#7](https://todo.sr.ht/~takeiteasy/sheaf/7).
 - The meaning of `Cell`, `Vector` and `Hashtable` is open:
   [#8](https://todo.sr.ht/~takeiteasy/sheaf/8).
-- Recursion that keeps growable locals across a recursive call is open:
-  [#10](https://todo.sr.ht/~takeiteasy/sheaf/10).
 - A loop that allocates on every iteration and never exits grows without
-  bound: [#11](https://todo.sr.ht/~takeiteasy/sheaf/11).
+  bound, and so does a cycle's region until the call into it returns:
+  [#11](https://todo.sr.ht/~takeiteasy/sheaf/11).
 
 [^goose]: Goose's specification covers the full rules: data stacks in §1.2
     and §1.3, roots in §9.2, stack assignment in §10.3, and recursion in §7.8.

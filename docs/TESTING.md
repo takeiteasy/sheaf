@@ -7,7 +7,7 @@ make test
 The tests use [FiveAM](https://github.com/lispci/fiveam) and live in
 `tests/`. A test compiles a Coalton program from `tests/fixtures/` with
 `compile-program`, then checks the captured IR, its monomorphized form, its
-defunctionalized form or its lowered form. Monomorphized and defunctionalized
+defunctionalized form, its lowered form or its stack assignment. Monomorphized and defunctionalized
 programs are also compiled back to Lisp and run; lowered ones run on
 `run-lowered`.
 
@@ -21,6 +21,7 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `nested.lisp` | A closure nested to a depth known only at runtime |
 | `recursive-data.lisp` | A data type holding a function, and a list of them |
 | `nested-optional.lisp` | A closure nested through an `Optional` to a runtime depth |
+| `stacks.lisp` | Lists built and returned, built and dropped, built in a recursive cycle, and held by a global |
 | `escape.lisp` | A function passed to raw Lisp, which defunctionalization rejects |
 
 `make test` loads `vendor/coalton` ahead of any Coalton Quicklisp has. It

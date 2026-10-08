@@ -32,9 +32,9 @@
 (defstruct (ir-literal (:include ir-node)) value)
 (defstruct (ir-local (:include ir-node)) name)
 (defstruct (ir-global (:include ir-node)) name)
-(defstruct (ir-let (:include ir-node)) name value body)
-(defstruct (ir-call (:include ir-node)) function args)
-(defstruct (ir-construct (:include ir-node)) constructor args)
+(defstruct (ir-let (:include ir-node)) name value body (stack nil))
+(defstruct (ir-call (:include ir-node)) function args (destination nil) (region nil))
+(defstruct (ir-construct (:include ir-node)) constructor args (stack nil))
 (defstruct (ir-prim (:include ir-node)) op args)
 (defstruct (ir-foreign (:include ir-node)) vars form)
 (defstruct (ir-match (:include ir-node)) scrutinee branches)
@@ -54,15 +54,18 @@
 
 (defstruct (ir-def (:constructor make-ir-def (name origin kind params result body location)))
   "A global. A `:function` has parameters, each a name and a type; a `:value`
-has none."
-  name origin kind params result body location)
+has none. Stack assignment clones a def per context and fills the last three
+slots."
+  name origin kind params result body location
+  (source nil) (destination nil) (pool nil))
 
 (defstruct (lowered (:constructor %make-lowered))
   "A program in Sheaf's IR: its globals, the constructors of every data type it
 reaches, and its root."
   (defs (make-hash-table :test 'eq) :type hash-table :read-only t)
   (types (make-hash-table :test 'eq) :type hash-table :read-only t)
-  (root nil :type symbol))
+  (root nil :type symbol)
+  (stack-count nil :type (or null fixnum)))
 
 (defun lowered-constructors (lowered type)
   "The constructors of the data type TYPE, in tag order."
