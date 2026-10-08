@@ -16,9 +16,9 @@ stack assignment ([STACKS.md](STACKS.md)).
 ```
 
 ```text
-Root checking rejects storing a reference rooted at INNER-72 into storage rooted at OUTER-71, which outlives it
-  ARR-SET-INNER at a value of type REF UFIX, offset 1216
-  ARR-SET-INNER at the store elements-set, offset 1198
+Root checking rejects storing a reference rooted at INNER-17 into storage rooted at OUTER-16, which outlives it
+  ARR-SET-INNER<Void → UFIX>{0} at a value of type REF INTEGER, offset 1216
+  ARR-SET-INNER<Void → UFIX>{0} at the store elements-set, offset 1198
 ```
 
 The error names the reference and the store, each with its source location.
@@ -88,6 +88,8 @@ hold a reference into another local.
   [#8](https://todo.sr.ht/~takeiteasy/sheaf/8).
 - Stack assignment does not use roots, and does not follow stores into arrays:
   [#25](https://todo.sr.ht/~takeiteasy/sheaf/25).
+- The return-storage and branch-escape rules reject some safe programs:
+  [#28](https://todo.sr.ht/~takeiteasy/sheaf/28).
 - The SBCL path does not run the check:
   [#17](https://todo.sr.ht/~takeiteasy/sheaf/17).
 

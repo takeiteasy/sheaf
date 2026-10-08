@@ -38,7 +38,7 @@ Sheaf's IR, so they lower, run and get stacks assigned like any other code.
 
 | Package | Function | Does |
 |---|---|---|
-| `fixed` | `(define-length N 4)` | Declares the length type `N`; used outside `coalton-toplevel` |
+| `fixed` | `(define-length N 4)` | Declares the length type `N`; used outside `coalton-toplevel`[^len] |
 | `fixed` | `(new x)` | A `FixedArray` of `x`; the length comes from its type |
 | `arr` | `(new n x)` | An `Array` of `n` copies of `x` |
 | `arr` | `(length a)`, `(index a i)`, `(set! a i x)` | On every array and `Slice` |
@@ -56,7 +56,7 @@ An array is built like any other storage ([STACKS.md](STACKS.md)): in the
 caller's destination when it may reach the result, otherwise in the
 function's pool. A `GrowArray` or `Stack` bound by a `let` owns a stack for
 that `let`, and the interpreter checks it is on top of the stack when it
-grows.[^top]
+grows.
 
 ## Limitations
 
@@ -67,7 +67,7 @@ grows.[^top]
 - A returned `GrowArray` built in a destination is not guaranteed to stay on
   top of its stack: [#24](https://todo.sr.ht/~takeiteasy/sheaf/24).
 
-[^top]: A `FixedArray` length is read from the type after monomorphization,
+[^len]: A `FixedArray` length is read from the type after monomorphization,
     through a table `define-length` fills. The `Extent` class that
     `define-length` instantiates gives `fixed:new` the same length on
     Coalton's own backend. The operations are matched by the origin of the

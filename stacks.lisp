@@ -52,6 +52,8 @@
         known
         (setf (gethash type *storage*)
               (or (eq (size-class type) :resizable)
+                  ;; TODO: a view holds storage only through the array it points into; roots (#4) can tell
+                  ;; https://todo.sr.ht/~takeiteasy/sheaf/25
                   (member (ir-type-kind type) '(:storage :view))
                   (pooled-p type)
                   (and (some #'holds-storage-p
