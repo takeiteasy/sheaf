@@ -261,7 +261,7 @@ shapes, and PATH holds the data shapes being built."
 (defstruct (binfo (:constructor make-binfo (name node kind params ret)))
   "What the analysis knows of one specialized binding. A function has PARAMS
 and RET shapes; a value has just RET."
-  name node kind params ret (state :open))
+  name node kind params ret (state :open) (shapes '()))
 
 (defvar *shapes*)
 (defvar *sites*)
@@ -367,10 +367,14 @@ its sets are then free to differ per use."
           (values (rest copies) (first copies)))
         (values (rest shapes) (first shapes)))))
 
+(defvar *collected* '()
+  "The shapes inferred for the binding being analyzed.")
+
 (defun infer (node env)
   (let* ((*at* node)
          (shape (infer-node node env)))
     (setf (gethash node *shapes*) shape)
+    (push shape *collected*)
     shape))
 
 (defun call-shape (fn args)
@@ -587,13 +591,76 @@ to; they are rebuilt where used, so are not captured."
 
 (defun infer-binding (binfo)
   (let* ((node (binfo-node binfo))
-         (*owner* (cons (binfo-name binfo) (ast:node-type node))))
+         (*owner* (cons (binfo-name binfo) (ast:node-type node)))
+         (*collected* '()))
     (ecase (binfo-kind binfo)
       (:function
        (let ((env (mapcar #'cons (ast:node-abstraction-vars node) (binfo-params binfo))))
          (unify-shapes (binfo-ret binfo) (infer (ast:node-abstraction-subexpr node) env))))
       (:value
-       (unify-shapes (binfo-ret binfo) (infer node '()))))))
+       (unify-shapes (binfo-ret binfo) (infer node '()))))
+    (setf (binfo-shapes binfo) *collected*)))
+
+;;; Nested closures
+;;;
+;;; A value holds its captures and its data fields by value, so a closure that
+;;; can be reached from its own captures has no fixed size. Lists are linked
+;;; cells in a pool, and cells, vectors and hashtables are references.
+
+(defparameter *reference-types*
+  '(coalton:list coalton/cell:cell coalton/vector:vector coalton/hashtable:hashtable))
+
+(defun shape-root (shape)
+  "The lambda set or data shape SHAPE is one of, or NIL for a shape with no function."
+  (etypecase shape
+    (atom-shape nil)
+    (fn-shape (find-cls (fn-shape-cls shape)))
+    (data-shape (find-data shape))))
+
+(defun held-roots (root)
+  "The roots ROOT holds by value, each with whether it is held as a capture."
+  (etypecase root
+    (cls (loop :for lcase :in (cls-cases root)
+               :append (loop :for capture :in (lcase-captures lcase)
+                             :for held := (shape-root capture)
+                             :when held :collect (cons held t))))
+    (data-shape
+     (unless (member (tc:tycon-name (first (tc:flatten-type (shape-ty root)))) *reference-types*)
+       (loop :for (nil . fields) :in (data-shape-ctors root)
+             :append (loop :for field :in fields
+                           :for held := (shape-root field)
+                           :when held :collect (cons held nil)))))))
+
+(defun reachable-p (from to)
+  (let ((seen (make-hash-table :test 'eq))
+        (pending (list from)))
+    (loop :while pending
+          :do (let ((root (pop pending)))
+                (when (eq root to) (return-from reachable-p t))
+                (unless (gethash root seen)
+                  (setf (gethash root seen) t)
+                  (dolist (held (held-roots root))
+                    (push (car held) pending)))))
+    nil))
+
+(defun check-no-nested-closures (binfo)
+  "Signal an error if a shape of BINFO holds a closure that holds itself through
+a capture."
+  (let ((seen (make-hash-table :test 'eq))
+        (pending (loop :for shape :in (append (binfo-shapes binfo) (binfo-params binfo)
+                                              (list (binfo-ret binfo)))
+                       :for root := (shape-root shape)
+                       :when root :collect root)))
+    (loop :while pending
+          :do (let ((root (pop pending)))
+                (unless (gethash root seen)
+                  (setf (gethash root seen) t)
+                  (loop :for (held . captured) :in (held-roots root)
+                        :do (push held pending)
+                            (when (and captured (reachable-p held root))
+                              (let ((*owner* (cons (binfo-name binfo) (ast:node-type (binfo-node binfo))))
+                                    (*at* (binfo-node binfo)))
+                                (unsupported "a closure nested inside itself to a depth known only at runtime, such as an iterator rebuilt in a loop")))))))))
 
 (defun make-binfo-for (name node)
   (let ((*owner* (cons name (ast:node-type node))))
@@ -627,6 +694,8 @@ to; they are rebuilt where used, so are not captured."
         (setf (gethash name *binfos*) (make-binfo-for name (gethash name bindings))))
       (dolist (name scc)
         (infer-binding (gethash name *binfos*)))
+      (dolist (name scc)
+        (check-no-nested-closures (gethash name *binfos*)))
       (dolist (name scc)
         (setf (binfo-state (gethash name *binfos*)) :done)))
     (%make-analysis :specialized specialized :shapes *shapes* :sites *sites*

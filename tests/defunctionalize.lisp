@@ -49,15 +49,15 @@
           :return (tc:function-return-type (ast:node-type node))))
 
 (test defunctionalized-programs-are-first-order
-  (dolist (fixture '("counter" "closures" "nested" "flows"))
+  (dolist (fixture '("counter" "closures" "flows" "recursive-data"))
     (is-true (sheaf:check-defunctionalized (defunctionalized fixture)) "~a" fixture)))
 
 (test defunctionalized-programs-run
   (is (= 287 (run-specialized (defunctionalized "counter"))))
   (is (= 51 (run-specialized (defunctionalized "closures"))))
   (is (= 55 (run-specialized (defunctionalized "flows"))))
-  (is (= (run-specialized (specialized "nested"))
-         (run-specialized (defunctionalized "nested")))))
+  (is (= (run-specialized (specialized "recursive-data"))
+         (run-specialized (defunctionalized "recursive-data")))))
 
 (test lambdas-reaching-one-slot-become-cases
   (let* ((result (defunctionalized "closures"))
@@ -120,8 +120,20 @@
   (is (null (sheaf:recursive-types (defunctionalized "closures"))))
   (is (null (sheaf:recursive-types (defunctionalized "counter")))))
 
-(test nesting-to-a-runtime-depth-makes-a-recursive-type
-  (is-true (sheaf:recursive-types (defunctionalized "nested"))))
+(defun defunctionalize-error-chain (fixture)
+  (handler-case (progn (sheaf:defunctionalize (specialized fixture)) nil)
+    (sheaf:specialization-error (e) (sheaf:specialization-error-chain e))))
+
+(test nesting-to-a-runtime-depth-is-an-error
+  (loop :for (fixture binding) :in '(("nested" "REWRAP") ("nested-optional" "CHAIN"))
+        :do (let ((entry (first (defunctionalize-error-chain fixture))))
+              (is-true entry "~a" fixture)
+              (is-true (search binding (symbol-name (first entry))) "~a" fixture)
+              (is-true (third entry) "~a" fixture))))
+
+(test a-declared-recursive-type-holding-functions-is-allowed
+  (let ((result (defunctionalized "recursive-data")))
+    (is-true (sheaf:recursive-types result))))
 
 (test a-function-reaching-raw-lisp-is-an-error
   (let ((chain (handler-case (progn (sheaf:defunctionalize (specialized "escape")) nil)
