@@ -707,32 +707,70 @@ to; they are rebuilt where used, so are not captured."
                :for (nil . ctype-fields) :in (data-ctype-ctors ctype)
                :do (mapc #'bind-ctype fields ctype-fields)))))))
 
-(defun ctype-key (ctype deep &optional path)
+(defun ctype-children (ctype deep)
+  (etypecase ctype
+    (atom-ctype '())
+    (fn-ctype (append (loop :for (nil . captures) :in (fn-ctype-cases ctype) :append captures)
+                      (and deep (cons (fn-ctype-ret ctype) (fn-ctype-args ctype)))))
+    (data-ctype (append (data-ctype-args ctype)
+                        (loop :for (nil . fields) :in (data-ctype-ctors ctype) :append fields)))))
+
+(defun ctype-label (ctype deep)
+  "What distinguishes CTYPE from another with the same children."
+  (etypecase ctype
+    (atom-ctype (list :atom (type-key (atom-ctype-ty ctype))))
+    (fn-ctype (list :fn
+                    (loop :for (lam . captures) :in (fn-ctype-cases ctype)
+                          :collect (cons (lam-id lam) (length captures)))
+                    (and deep (length (fn-ctype-args ctype)))))
+    (data-ctype (list :data (type-key (data-ctype-source ctype))
+                      (length (data-ctype-args ctype))
+                      (loop :for (ctor . fields) :in (data-ctype-ctors ctype)
+                            :collect (cons ctor (length fields)))))))
+
+(defun ctype-key (ctype deep)
   "A key equal for equal ctypes. DEEP also keys the arguments and results of
 function types, which the lambda sets alone do not fix."
-  ;; TODO: isomorphic cyclic graphs entered at different nodes key differently;
-  ;; minimise by bisimulation before keying.
-  ;; https://todo.sr.ht/~takeiteasy/sheaf/21
-  (etypecase ctype
-    (atom-ctype (type-key (atom-ctype-ty ctype)))
-    (ctype
-     (let ((position (position ctype path)))
-       (if position
-           (list :recur position)
-           (let ((path (cons ctype path)))
-             (flet ((keys (ctypes) (mapcar (lambda (c) (ctype-key c deep path)) ctypes)))
-               (etypecase ctype
-                 (fn-ctype
-                  (list* :fn
-                         (loop :for (lam . captures) :in (fn-ctype-cases ctype)
-                               :collect (cons (lam-id lam) (keys captures)))
-                         (and deep
-                              (list (keys (fn-ctype-args ctype)) (car (keys (list (fn-ctype-ret ctype))))))))
-                 (data-ctype
-                  (list :data (type-key (data-ctype-source ctype))
-                        (keys (data-ctype-args ctype))
-                        (loop :for (ctor . fields) :in (data-ctype-ctors ctype)
-                              :collect (cons ctor (keys fields)))))))))))))
+  (let ((nodes '())
+        (seen (make-hash-table :test 'eq)))
+    (labels ((collect (node)
+               (unless (gethash node seen)
+                 (setf (gethash node seen) t)
+                 (push node nodes)
+                 (mapc #'collect (ctype-children node deep)))))
+      (collect ctype))
+    (let ((class (make-hash-table :test 'eq))
+          (count 0))
+      ;; Nodes the same graph reaches in different ways are merged by refining
+      ;; classes until they stop splitting, so equal cyclic types key equally.
+      (flet ((renumber (signature-of)
+               (let ((ids (make-hash-table :test 'equal)))
+                 (dolist (node nodes)
+                   (let ((signature (funcall signature-of node)))
+                     (setf (gethash node class)
+                           (or (gethash signature ids)
+                               (setf (gethash signature ids) (hash-table-count ids))))))
+                 (hash-table-count ids))))
+        (setf count (renumber (lambda (node) (ctype-label node deep))))
+        (loop (let ((new (renumber (lambda (node)
+                                     (list (gethash node class)
+                                           (mapcar (lambda (child) (gethash child class))
+                                                   (ctype-children node deep)))))))
+                (when (= new count) (return))
+                (setf count new))))
+      (let ((representative (make-hash-table)))
+        (dolist (node (reverse nodes))
+          (unless (gethash (gethash node class) representative)
+            (setf (gethash (gethash node class) representative) node)))
+        (labels ((key (id path)
+                   (let ((position (position id path)))
+                     (if position
+                         (list :recur position)
+                         (let ((node (gethash id representative)))
+                           (list (ctype-label node deep)
+                                 (mapcar (lambda (child) (key (gethash child class) (cons id path)))
+                                         (ctype-children node deep))))))))
+          (key (gethash ctype class) '()))))))
 
 ;;; Synthesized types
 

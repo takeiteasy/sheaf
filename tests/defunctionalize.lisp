@@ -128,3 +128,20 @@
                  (sheaf:specialization-error (e) (sheaf:specialization-error-chain e)))))
     (is-true chain)
     (is-true (third (first chain)))))
+
+(test equal-cyclic-types-key-equally
+  ;; One list node whose tail is itself, and one that reaches it through a prefix.
+  (let* ((lam (sheaf::make-lam 0 nil nil nil))
+         (ty (tc:make-tycon :name 'coalton:ufix :kind tc:+kstar+))
+         (tight (sheaf::make-fn-ctype))
+         (prefix (sheaf::make-fn-ctype))
+         (other (sheaf::make-fn-ctype)))
+    (setf (sheaf::fn-ctype-cases tight) (list (list lam tight (sheaf::make-atom-ctype ty)))
+          (sheaf::fn-ctype-cases other) (list (list lam prefix (sheaf::make-atom-ctype ty)))
+          (sheaf::fn-ctype-cases prefix) (list (list lam other (sheaf::make-atom-ctype ty))))
+    (is (equal (sheaf::ctype-key tight nil) (sheaf::ctype-key other nil)))
+    (is (not (equal (sheaf::ctype-key tight nil)
+                    (sheaf::ctype-key (let ((c (sheaf::make-fn-ctype)))
+                                        (setf (sheaf::fn-ctype-cases c) (list (list lam (sheaf::make-atom-ctype ty))))
+                                        c)
+                                      nil))))))
