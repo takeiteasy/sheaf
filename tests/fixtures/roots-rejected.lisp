@@ -5,6 +5,7 @@
   (:use #:coalton #:coalton-prelude #:sheaf/prelude)
   (:local-nicknames
    (#:arr #:sheaf/prelude/arr)
+   (#:cell #:coalton/cell)
    (#:grow #:sheaf/prelude/grow)
    (#:ref #:sheaf/prelude/ref)))
 
@@ -51,6 +52,14 @@
       (let ((outer (arr:new 1 (arr:ref base 0))))
         (let ((inner (arr:new 1 0)))
           (arr:set! outer 0 (arr:ref inner 0))
+          0))))
+
+  (declare cell-write-inner (Void -> UFix))
+  (define (cell-write-inner)
+    (let ((base (arr:new 1 0)))
+      (let ((outer (cell:new (arr:ref base 0))))
+        (let ((inner (arr:new 1 0)))
+          (cell:write! outer (arr:ref inner 0))
           0))))
 
   (declare push-inner (Void -> UFix))

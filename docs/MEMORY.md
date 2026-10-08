@@ -55,14 +55,15 @@ recursive call, as Goose rejects it.
 
 Coalton's immutable data reads the same whether it is copied or shared, so
 Sheaf can treat it as plain values without changing what a program means.
-The mutable types (`Cell`, `Vector`, `Hashtable`) stay references and are meant
-to obey the root rule, which does not check them yet. Lists are cons cells in a pool, linked by relative
+A `Cell` is one-element storage and obeys the root rule. `Vector` and
+`Hashtable` stay references and are meant to, which is not checked yet. Lists are cons cells in a pool, linked by relative
 references.
 
 ## Limitations
 
-- The meaning of `Cell`, `Vector` and `Hashtable` is open, and root checking
-  skips them: [#8](https://todo.sr.ht/~takeiteasy/sheaf/8).
+- The meaning of `Vector` and `Hashtable` is open, and root checking skips
+  them: [#29](https://todo.sr.ht/~takeiteasy/sheaf/29),
+  [#30](https://todo.sr.ht/~takeiteasy/sheaf/30).
 - Cells are linked by C pointers, not relative references:
   [#26](https://todo.sr.ht/~takeiteasy/sheaf/26).
 - A loop that allocates on every iteration and never exits grows without

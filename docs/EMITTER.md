@@ -53,7 +53,7 @@ The excerpt omits `SHEAF_UNUSED` attributes and temporaries.
 | `UFix` | `uint64_t` |
 | A data type that contains itself | `struct Tn *`, a cell on a data stack[^links] |
 | Any other data type | `struct Tn` by value: a `tag` and a union of the constructors' fields |
-| `Cell`, `Vector`, `Hashtable` | An emit error |
+| `Vector`, `Hashtable` | An emit error |
 | Any other scalar | An emit error |
 
 ## Stacks
@@ -87,7 +87,8 @@ committed). A push past the end prints `data stack n exhausted` and exits.
 - Arrays, slices and references: [#27](https://todo.sr.ht/~takeiteasy/sheaf/27).
 - Only `UFix` and the data types built from it are emitted:
   [#23](https://todo.sr.ht/~takeiteasy/sheaf/23),
-  [#8](https://todo.sr.ht/~takeiteasy/sheaf/8).
+  [#29](https://todo.sr.ht/~takeiteasy/sheaf/29),
+  [#30](https://todo.sr.ht/~takeiteasy/sheaf/30).
 - `UFix` arithmetic wraps at 64 bits: [#9](https://todo.sr.ht/~takeiteasy/sheaf/9).
 - Cells are linked by pointers, not relative references:
   [#26](https://todo.sr.ht/~takeiteasy/sheaf/26).

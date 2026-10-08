@@ -145,6 +145,7 @@ the run touched when the program has a stack assignment."
                    (ecase op
                      (:fixed-new (allocate :fixed (elements (fixed-length type) (first args)) node))
                      (:array-new (allocate :variable (elements (first args) (second args)) node))
+                     (:cell-new (allocate :fixed (elements 1 (first args)) node))
                      (:grow-new (allocate :grow (elements 0 nil) node))
                      (:stack-new (allocate :grow-shrink (elements 0 nil) node))
                      ((:grow-push :stack-push)
@@ -181,6 +182,15 @@ the run touched when the program has a stack assignment."
                             (error "The range ~d to ~d is outside the array of ~d elements" lo hi (- end start)))
                           (make-slice-value (if (typep source 'storage) source (slice-value-target source))
                                             (+ start lo) (+ start hi)))))
+                     (:cell-read
+                      (live (first args) "A cell read")
+                      (aref (datum-fields (first args)) 0))
+                     (:cell-write
+                      (live (first args) "A cell written")
+                      (setf (aref (datum-fields (first args)) 0) (second args)))
+                     (:cell-swap
+                      (live (first args) "A cell written")
+                      (shiftf (aref (datum-fields (first args)) 0) (second args)))
                      (:ref-get
                       (let ((ref (first args)))
                         (live ref "A reference read")

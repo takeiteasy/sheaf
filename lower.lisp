@@ -128,13 +128,16 @@ reaches, and its root."
     (sheaf/prelude:growarray :storage :grow)
     (sheaf/prelude:stack :storage :grow-shrink)
     (sheaf/prelude:slice :view)
-    (sheaf/prelude:ref :view))
+    (sheaf/prelude:ref :view)
+    (coalton/cell:cell :storage :fixed))
   "The prelude's types: the kind of each, and for arrays how it is sized.")
 
 (defparameter *prelude-ops*
   '((:fixed-new 1 :fixed) (:array-new 2 :variable) (:grow-new 0 :resizable) (:stack-new 0 :resizable)
+    (:cell-new 1 :fixed)
     (:grow-push 2) (:stack-push 2) (:stack-pop 1)
     (:ref-get 1) (:ref-set 2)
+    (:cell-read 1) (:cell-write 2) (:cell-swap 2)
     (:elements-length 1) (:elements-index 2) (:elements-set 3)
     (:elements-ref 2) (:elements-slice 3))
   "The operations of the prelude: the arity of each, and the size class of what it allocates.")
@@ -147,7 +150,11 @@ reaches, and its root."
     (sheaf/prelude/stack:push! . :stack-push)
     (sheaf/prelude/stack:pop! . :stack-pop)
     (sheaf/prelude/ref:get . :ref-get)
-    (sheaf/prelude/ref:set! . :ref-set)))
+    (sheaf/prelude/ref:set! . :ref-set)
+    (coalton/cell:new . :cell-new)
+    (coalton/cell:read . :cell-read)
+    (coalton/cell:write! . :cell-write)
+    (coalton/cell:swap! . :cell-swap)))
 
 (defparameter *prelude-classes*
   '((sheaf/prelude/fixed:extent :fixed-new)
@@ -211,8 +218,8 @@ method in the order the class declares them.")
          :chain (and *def* (list (list (car *def*) (cdr *def*) *location*)))))
 
 (defparameter *opaque-types*
-  '(coalton/cell:cell coalton/vector:vector coalton/hashtable:hashtable)
-  "Types that are references to mutable storage, whose meaning is open (#8).")
+  '(coalton/vector:vector coalton/hashtable:hashtable)
+  "Types that are references to mutable storage, whose meaning is open (#29, #30).")
 
 (defun prelude-class (type)
   "How the array TYPE is sized: `:fixed`, `:variable`, `:grow` or `:grow-shrink`."

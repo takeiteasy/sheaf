@@ -64,6 +64,8 @@ upper case."
                (chain "ARR-SET-INNER")))
     (is (equal '("(arr:ref inner 0)" "(grow:push! outer (arr:ref inner 0))")
                (chain "PUSH-INNER")))
+    (is (equal '("(arr:ref inner 0)" "(cell:write! outer (arr:ref inner 0))")
+               (chain "CELL-WRITE-INNER")))
     (is (equal '("(arr:ref inner 0)" "(arr:set! outer 0 (arr:ref inner 0))")
                (chain "STORE-INTO-PARAM")))
     (is (equal '("(arr:ref inner 0)" "(arr:set! table 0 (arr:ref inner 0))")

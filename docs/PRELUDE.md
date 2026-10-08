@@ -30,9 +30,11 @@ Sheaf's IR, so they lower, run and get stacks assigned like any other code.
 | `(Stack :t)` | Resizable, grow-shrink | Elements; it has no references or slices |
 | `(Slice :t)` | View | A range of an array |
 | `(Ref :t)` | View | One element of an array |
+| `(Cell :t)` | Fixed | One element; Coalton's `coalton/cell:Cell` |
 
-`Cell`, `Vector` and `Hashtable` are not part of the prelude
-([#8](https://todo.sr.ht/~takeiteasy/sheaf/8)).
+`Vector` and `Hashtable` are not part of the prelude
+([#29](https://todo.sr.ht/~takeiteasy/sheaf/29),
+[#30](https://todo.sr.ht/~takeiteasy/sheaf/30)).
 
 ## Operations
 
@@ -46,6 +48,7 @@ Sheaf's IR, so they lower, run and get stacks assigned like any other code.
 | `grow` | `(new)`, `(push! a x)` | A `GrowArray`, and an append |
 | `stack` | `(new)`, `(push! s x)`, `(pop! s)` | A `Stack`; `pop!` returns an `Optional` |
 | `ref` | `(get r)`, `(set! r x)` | Read and write the element |
+| `coalton/cell` | `(new x)`, `(read c)`, `(write! c x)`, `(swap! c x)` | A `Cell`, its contents, and a write that returns the new or the old value |
 
 Mutating operations return `Unit`. An index outside an array is an error.
 Arrays are shared, not copied, when bound to another name.
@@ -60,7 +63,7 @@ grows.
 
 ## Limitations
 
-- The C emitter rejects the prelude's types and operations:
+- The C emitter rejects the prelude's types and operations, and `Cell`:
   [#27](https://todo.sr.ht/~takeiteasy/sheaf/27).
 - Elements other than `UFix` and the data types built from it have no
   primitives: [#23](https://todo.sr.ht/~takeiteasy/sheaf/23).

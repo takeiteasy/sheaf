@@ -53,8 +53,8 @@ enclosing node's.
 | `lowered-root` | The root's name |
 | `lowered-stack-count` | The stacks the program needs, once assigned ([STACKS.md](STACKS.md)); otherwise `nil` |
 
-A type is an `ir-type` of kind `:scalar`, `:data`, `:reference` (`Cell`,
-`Vector`, `Hashtable`), `:storage` (the prelude's arrays) or `:view` (`Slice`
+A type is an `ir-type` of kind `:scalar`, `:data`, `:reference` (`Vector`,
+`Hashtable`), `:storage` (the prelude's arrays and `Cell`) or `:view` (`Slice`
 and `Ref`), and equal types are the same object.
 
 | Function | Does |
@@ -82,8 +82,11 @@ well. An allocating one holds the stack it pushes to in `ir-prim-stack`.
   [#23](https://todo.sr.ht/~takeiteasy/sheaf/23).
 - A recursive `let` or the node kinds defunctionalization rejects are
   errors: [#20](https://todo.sr.ht/~takeiteasy/sheaf/20).
-- `Cell`, `Vector` and `Hashtable` are opaque references:
-  [#8](https://todo.sr.ht/~takeiteasy/sheaf/8).
+- `Vector` and `Hashtable` are opaque references:
+  [#29](https://todo.sr.ht/~takeiteasy/sheaf/29),
+  [#30](https://todo.sr.ht/~takeiteasy/sheaf/30).
+- `Cell` functions other than `new`, `read`, `write!` and `swap!`, such as
+  `update!`, hold raw Lisp: [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
 - `UFix` is unsigned 63-bit, and overflow is unspecified:
   [#9](https://todo.sr.ht/~takeiteasy/sheaf/9).
 

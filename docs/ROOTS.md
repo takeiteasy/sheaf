@@ -28,16 +28,17 @@ A store inside a callee also names the call.
 
 | Value | Root |
 |---|---|
-| An array | The `let` that builds it |
+| An array or `Cell` | The `let` that builds it |
 | A `Ref` or `Slice` | The roots of the array it points into |
 | A parameter | The caller's argument |
 | A global | A global |
 | A tuple or other data | Every root of the references it holds |
 | A value read out of an array | The roots of the array[^inexact] |
 
-Only values that are, or hold, an array, slice or reference have roots. A
-list of `UFix` has none. `Cell`, `Vector` and `Hashtable` have none either
-([#8](https://todo.sr.ht/~takeiteasy/sheaf/8)).
+Only values that are, or hold, an array, slice, reference or `Cell` have roots.
+A list of `UFix` has none. `Vector` and `Hashtable` have none either
+([#29](https://todo.sr.ht/~takeiteasy/sheaf/29),
+[#30](https://todo.sr.ht/~takeiteasy/sheaf/30)).
 
 ## The rule
 
@@ -84,8 +85,9 @@ hold a reference into another local.
 
 ## Limitations
 
-- `Cell`, `Vector` and `Hashtable` are not checked:
-  [#8](https://todo.sr.ht/~takeiteasy/sheaf/8).
+- `Vector` and `Hashtable` are not checked:
+  [#29](https://todo.sr.ht/~takeiteasy/sheaf/29),
+  [#30](https://todo.sr.ht/~takeiteasy/sheaf/30).
 - Stack assignment does not use roots, and does not follow stores into arrays:
   [#25](https://todo.sr.ht/~takeiteasy/sheaf/25).
 - The return-storage and branch-escape rules reject some safe programs:

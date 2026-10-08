@@ -17,6 +17,14 @@
   (remove-if-not (lambda (node) (sheaf::primitive-allocates (sheaf:ir-prim-op node)))
                  (prims lowered)))
 
+(defun allocating-prims-of (def)
+  (let ((nodes '()))
+    (sheaf:walk-ir (lambda (node)
+                     (when (and (typep node 'sheaf:ir-prim) (sheaf::primitive-allocates (sheaf:ir-prim-op node)))
+                       (push node nodes)))
+                   (sheaf:ir-def-body def))
+    nodes))
+
 (defun run-on-sbcl (fixture)
   (fixture-program fixture)
   (funcall (symbol-function (fixture-symbol fixture "MAIN"))))
@@ -27,16 +35,36 @@
     (is (= expected (sheaf:run-lowered (lowered "arrays"))))
     (is (= expected (sheaf:run-lowered (assigned "arrays"))))))
 
+(defun prelude-ops-used (&rest fixtures)
+  (sort (remove-duplicates
+         (loop :for fixture :in fixtures
+               :append (mapcar #'sheaf:ir-prim-op (prims-with-prelude-ops (lowered fixture)))))
+        #'string<))
+
 (test arrays-lower-to-primitives
   (is (zerop (count-ir (lowered "arrays") 'sheaf:ir-foreign)))
+  (is (zerop (count-ir (lowered "cells") 'sheaf:ir-foreign)))
   (is (equal (sort (mapcar #'first sheaf::*prelude-ops*) #'string<)
-             (sort (remove-duplicates (mapcar #'sheaf:ir-prim-op
-                                              (remove-if (lambda (node)
-                                                           (member (sheaf:ir-prim-op node)
-                                                                   '(:ufix-add :ufix-sub :ufix-mul :ufix-eq
-                                                                     :ufix-compare :ufix-from-int :ordering-eq)))
-                                                         (prims (lowered "arrays")))))
-                   #'string<))))
+             (prelude-ops-used "arrays" "cells"))))
+
+(test cells-give-one-result-on-every-tier
+  (let ((expected (run-on-sbcl "cells")))
+    (is (= 29 expected))
+    (is (= expected (sheaf:run-lowered (lowered "cells"))))
+    (is (= expected (sheaf:run-lowered (assigned "cells"))))))
+
+(test a-returned-cell-is-built-in-the-destination
+  (let ((clone (first (clones "cells" "FRESH-CELL"))))
+    (is (integerp (sheaf:ir-def-destination clone)))
+    (dolist (node (allocating-prims-of clone))
+      (is (eql (sheaf:ir-def-destination clone) (sheaf:ir-prim-stack node))))))
+
+(test a-cell-that-is-dropped-is-built-in-a-pool
+  (let ((clone (first (clones "cells" "LOCAL-SUM"))))
+    (is (null (sheaf:ir-def-destination clone)))
+    (is (integerp (sheaf:ir-def-pool clone)))
+    (dolist (node (allocating-prims-of clone))
+      (is (eql (sheaf:ir-def-pool clone) (sheaf:ir-prim-stack node))))))
 
 (test arrays-are-well-formed
   (is-true (sheaf:check-lowered (lowered "arrays")))

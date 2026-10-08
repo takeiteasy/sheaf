@@ -20,12 +20,16 @@ roots."
 ;; op, how it treats roots, and the arguments it uses
 (defparameter *prim-roots*
   '((:fixed-new :allocates 0) (:array-new :allocates 1) (:grow-new :allocates) (:stack-new :allocates)
+    (:cell-new :allocates 0)
     (:grow-push :stores 1 0) (:stack-push :stores 1 0) (:ref-set :stores 1 0) (:elements-set :stores 2 0)
-    (:stack-pop :reads 0) (:ref-get :reads 0) (:elements-index :reads 0)
+    (:cell-write :stores 1 0 :returns-stored) (:cell-swap :stores 1 0 :returns-container)
+    (:stack-pop :reads 0) (:ref-get :reads 0) (:elements-index :reads 0) (:cell-read :reads 0)
     (:elements-ref :reads 0) (:elements-slice :reads 0))
   "How the prelude's primitives treat roots. An allocating primitive makes a root
-and may store its initial element, a storing one stores its first argument into
-its second, and a reading one gives back the roots of its container.")
+and may store its initial element, a storing one stores the argument at its
+first index into the one at its second and gives back nothing, the value stored
+or the roots of its container, and a reading one gives back the roots of its
+container.")
 
 (defun holds-reference-p (type)
   "Whether a value of TYPE is, or holds, an array, slice or reference."
@@ -130,7 +134,7 @@ is true a store that no caller could make safe is an error."
              (fresh-root (owner)
                (if (eq owner :fresh) :fresh owner))
              (walk-prim (node env depth owner)
-               (destructuring-bind (&optional kind first-index second-index)
+               (destructuring-bind (&optional kind first-index second-index returns)
                    (cdr (assoc (ir-prim-op node) *prim-roots*))
                  (let ((args (ir-prim-args node)))
                    (ecase kind
@@ -154,7 +158,10 @@ is true a store that no caller could make safe is an error."
                                        (walk (nth second-index args) env depth owner)
                                        value
                                        (list (entry (format nil "the store ~(~a~)" (ir-prim-op node)))))))
-                      '())
+                      (and (holds-reference-p (ir-node-type node))
+                           (case returns
+                             (:returns-stored (walk (nth first-index args) env depth owner))
+                             (:returns-container (walk (nth second-index args) env depth owner)))))
                      (:reads
                       (and (holds-reference-p (ir-node-type node))
                            (walk (nth first-index args) env depth owner)))))))
