@@ -271,7 +271,7 @@ and RET shapes; a value has just RET."
 (defvar *group-lams*)
 
 (defun node-children (node)
-  (etypecase node
+  (typecase node
     ((or ast:node-literal ast:node-variable ast:node-lisp) '())
     (ast:node-application
      (when (ast:node-application-keyword-rands node)
@@ -288,7 +288,10 @@ and RET shapes; a value has just RET."
     (ast:node-seq (ast:node-seq-nodes node))
     (ast:node-locally (list (ast:node-locally-subexpr node)))
     (ast:node-match (cons (ast:node-match-expr node)
-                          (mapcar #'match-branch-body-of (ast:node-match-branches node))))))
+                          (mapcar #'match-branch-body-of (ast:node-match-branches node))))
+    ;; TODO: only the node kinds the fixtures use; the rest signal an error.
+    ;; https://todo.sr.ht/~takeiteasy/sheaf/20
+    (t (unsupported "~(~a~) nodes" (type-of node)))))
 
 (defun match-branch-body-of (branch)
   (ast:match-branch-body branch))
@@ -390,7 +393,7 @@ its sets are then free to differ per use."
   (and (not (assoc name env)) (gethash name *binfos*)))
 
 (defun infer-node (node env)
-  (etypecase node
+  (typecase node
     (ast:node-literal (shape-of (ast:node-type node)))
     (ast:node-variable (infer-variable node env))
     (ast:node-application (infer-application node env))
@@ -405,7 +408,8 @@ its sets are then free to differ per use."
                       (setf shape (infer child env)))))
     (ast:node-locally (infer (ast:node-locally-subexpr node) env))
     (ast:node-match (infer-match node env))
-    (ast:node-lisp (infer-lisp node env))))
+    (ast:node-lisp (infer-lisp node env))
+    (t (unsupported "~(~a~) nodes" (type-of node)))))
 
 (defun infer-variable (node env)
   (let* ((name (ast:node-variable-value node))
