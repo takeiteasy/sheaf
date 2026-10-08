@@ -12,11 +12,14 @@
 that owner took it, and the cells pushed since."
   (owned nil) (mark '()) (items '()))
 
+(defun named-constructor (lowered type name)
+  "The constructor of TYPE whose symbol name is NAME."
+  (find name (lowered-constructors lowered type)
+        :key (lambda (constructor) (symbol-name (ir-constructor-name constructor)))
+        :test #'string=))
+
 (defun constructor-named (lowered type name)
-  (ir-constructor-name
-   (find name (lowered-constructors lowered type)
-         :key (lambda (constructor) (symbol-name (ir-constructor-name constructor)))
-         :test #'string=)))
+  (ir-constructor-name (named-constructor lowered type name)))
 
 (defun apply-primitive (lowered op args type)
   (destructuring-bind (&optional a b) args

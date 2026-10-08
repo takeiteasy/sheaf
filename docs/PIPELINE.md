@@ -1,7 +1,7 @@
 # Pipeline
 
 Sheaf uses Coalton as its frontend: Coalton parses and typechecks, and Sheaf
-takes over from the typed IR. Every stage but the root checker and the C emitter exists today.
+takes over from the typed IR. Every stage but the root checker exists today.
 
 | Stage | Does | Status |
 |---|---|---|
@@ -12,7 +12,7 @@ takes over from the typed IR. Every stage but the root checker and the C emitter
 | Lowering | Turns the result into Sheaf's first-order IR ([IR.md](IR.md)) | `lower.lisp` |
 | Data stack assignment | Gives each cell and growable value a stack ([STACKS.md](STACKS.md)) | `stacks.lisp` |
 | Root checking | Rejects a reference stored where its root does not outlive it ([MEMORY.md](MEMORY.md)) | planned |
-| C emitter | One C file per program | planned |
+| C emitter | One C file per program ([EMITTER.md](EMITTER.md)) | `emit.lisp` |
 
 Coalton's own backend is the development tier: programs compile and run on
 SBCL through it, and the REPL works there. Sheaf's checks are meant to run on
@@ -52,8 +52,7 @@ that expands to it, such as `assert`.
 - The SBCL path does not run Sheaf's checks yet:
   [#17](https://todo.sr.ht/~takeiteasy/sheaf/17).
 - Root checking: [#4](https://todo.sr.ht/~takeiteasy/sheaf/4).
-- The C emitter, exceptions and tail calls:
-  [#6](https://todo.sr.ht/~takeiteasy/sheaf/6),
+- Exceptions and mutual tail calls in C:
   [#13](https://todo.sr.ht/~takeiteasy/sheaf/13),
   [#14](https://todo.sr.ht/~takeiteasy/sheaf/14).
 - `Integer` and overflow semantics: [#9](https://todo.sr.ht/~takeiteasy/sheaf/9).

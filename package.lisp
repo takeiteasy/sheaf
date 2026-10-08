@@ -44,6 +44,8 @@
    #:walk-ir
    #:assign-stacks
    #:check-assigned
+   #:emit-c
+   #:write-c
    #:size-class
    #:lowered-stack-count
    #:ir-type #:ir-type-kind #:ir-type-name #:ir-type-args

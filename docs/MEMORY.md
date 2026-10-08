@@ -61,6 +61,8 @@ references.
   [#7](https://todo.sr.ht/~takeiteasy/sheaf/7).
 - The meaning of `Cell`, `Vector` and `Hashtable` is open:
   [#8](https://todo.sr.ht/~takeiteasy/sheaf/8).
+- Cells are linked by C pointers, not relative references:
+  [#26](https://todo.sr.ht/~takeiteasy/sheaf/26).
 - A loop that allocates on every iteration and never exits grows without
   bound, and so does a cycle's region until the call into it returns:
   [#11](https://todo.sr.ht/~takeiteasy/sheaf/11).

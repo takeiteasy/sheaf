@@ -22,7 +22,10 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `recursive-data.lisp` | A data type holding a function, and a list of them |
 | `nested-optional.lisp` | A closure nested through an `Optional` to a runtime depth |
 | `stacks.lisp` | Lists built and returned, built and dropped, built in a recursive cycle, and held by a global |
+| `tail.lisp` | A self tail call run ten million times, and a list built by one |
 | `escape.lisp` | A function passed to raw Lisp, which defunctionalization rejects |
+
+`tests/emit.lisp` compiles the emitted C with `$CC` (default `cc`), so `make test` needs a C compiler.
 
 `make test` loads `vendor/coalton` ahead of any Coalton Quicklisp has. It
 reads `QUICKLISP` (default `~/quicklisp/setup.lisp`) and `SBCL`.

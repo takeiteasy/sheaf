@@ -78,6 +78,13 @@
                         unions)
                 :test #'equal))))
 
+(test a-union-no-lambda-reaches-is-an-empty-data-type
+  (is (loop :for type :being :the :hash-keys :of (sheaf:lowered-types (lowered "flows"))
+              :using (:hash-value constructors)
+            :thereis (and (null constructors)
+                          (eql 0 (search "FN" (symbol-name (sheaf:ir-type-name type))))
+                          (eq :data (sheaf:ir-type-kind type))))))
+
 (test raw-lisp-stays-opaque
   (let ((lowered (lowered "counter")))
     (is (plusp (count-ir lowered 'sheaf:ir-foreign)))

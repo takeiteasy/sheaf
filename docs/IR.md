@@ -2,7 +2,7 @@
 
 After defunctionalization, `lower` turns the program into Sheaf's own
 first-order IR in A-normal form. Root checking, data stack assignment
-([STACKS.md](STACKS.md)) and the C emitter ([MEMORY.md](MEMORY.md)) read this IR, so they never see Coalton's node
+([STACKS.md](STACKS.md)) and the C emitter ([EMITTER.md](EMITTER.md)) read this IR, so they never see Coalton's node
 types or environment.
 
 ```lisp

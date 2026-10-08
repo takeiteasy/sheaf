@@ -18,6 +18,7 @@ on stacks the compiler assigns, and memory is freed when its scope ends.
 | [PIPELINE.md](docs/PIPELINE.md) | The compiler's stages, and IR capture |
 | [IR.md](docs/IR.md) | The first-order IR the analyses read |
 | [STACKS.md](docs/STACKS.md) | Assigning data stacks to cells and growable values |
+| [EMITTER.md](docs/EMITTER.md) | Emitting C and the data stack runtime |
 | [MONOMORPHIZATION.md](docs/MONOMORPHIZATION.md) | Specializing at ground types and removing dictionaries |
 | [COALTON.md](docs/COALTON.md) | The Coalton fork and how it is updated |
 | [STATUS.md](docs/STATUS.md) | What runs today |
