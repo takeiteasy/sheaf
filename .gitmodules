@@ -1,0 +1,4 @@
+[submodule "vendor/coalton"]
+	path = vendor/coalton
+	url = git@github.com:takeiteasy/coalton.git
+	branch = sheaf
