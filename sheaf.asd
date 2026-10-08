@@ -3,7 +3,7 @@
 (asdf:defsystem #:sheaf
   :description "A statically typed Lisp with no heap, built on a Coalton frontend"
   :author "George Watson <gigolo@hotmail.co.uk>"
-  :license "MIT"
+  :license "GPL-3.0-or-later"
   :version "0.0.1"
   :depends-on (#:coalton)
   :pathname "src/"
