@@ -72,13 +72,16 @@ of the construct.
 - A closure nested inside closures to a depth known only at runtime, such as
   an iterator rebuilt in a loop, makes a type that contains itself:
   [#3](https://todo.sr.ht/~takeiteasy/sheaf/3).
+- Equivalent cyclic types reached from different points can become distinct
+  types: [#21](https://todo.sr.ht/~takeiteasy/sheaf/21).
 - A function value passed to a standard library function that has no captured
   code, such as the list `fold` reached through `map`, is an error:
   [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
 - Partial application, keyword arguments, constructors used as functions and
   the `catch`, `for` and `values` forms are errors:
   [#20](https://todo.sr.ht/~takeiteasy/sheaf/20).
-- A `Cell` captured by only one closure is not yet moved into its captures:
+- A `Cell` captured by only one closure stays a separate value, not a field of
+  that closure's case:
   [#18](https://todo.sr.ht/~takeiteasy/sheaf/18).
 
 [^sets]: A lambda set is found by unifying function types: a function type's

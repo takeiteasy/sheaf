@@ -49,12 +49,13 @@
           :return (tc:function-return-type (ast:node-type node))))
 
 (test defunctionalized-programs-are-first-order
-  (dolist (fixture '("counter" "closures" "nested"))
+  (dolist (fixture '("counter" "closures" "nested" "flows"))
     (is-true (sheaf:check-defunctionalized (defunctionalized fixture)) "~a" fixture)))
 
 (test defunctionalized-programs-run
   (is (= 287 (run-specialized (defunctionalized "counter"))))
   (is (= 51 (run-specialized (defunctionalized "closures"))))
+  (is (= 55 (run-specialized (defunctionalized "flows"))))
   (is (= (run-specialized (specialized "nested"))
          (run-specialized (defunctionalized "nested")))))
 
@@ -69,21 +70,25 @@
                         #'<)))
     (is (equal '(0 1) arities))))
 
+(defun branch-count-p (count)
+  (lambda (node)
+    (and (union-match-p node) (= count (length (ast:node-match-branches node))))))
+
 (test calls-dispatch-on-the-tag
-  (let ((result (defunctionalized "closures")))
-    (is (plusp (count-nodes result #'union-match-p)))
-    (is (zerop (count-nodes (defunctionalized "counter")
-                            (lambda (node)
-                              (and (union-match-p node)
-                                   (null (rest (ast:node-match-branches node)))
-                                   nil)))))))
+  (is (plusp (count-nodes (defunctionalized "closures") (branch-count-p 2)))))
+
+(defun lifted-bindings (specialized name)
+  "The nodes of the specializations of the global NAME."
+  (loop :for symbol :being :the :hash-keys :of (sheaf:specialized-bindings specialized)
+          :using (:hash-value node)
+        :when (eq name (sheaf:specialized-origin specialized symbol))
+          :collect node))
 
 (test a-lone-lambda-is-called-directly
-  (let ((result (defunctionalized "closures")))
-    (maphash (lambda (name node)
-               (when (eq (fixture-symbol "closures" "SUM-TO") (sheaf:specialized-origin result name))
-                 (is (zerop (count-nodes-in node #'union-match-p)))))
-             (sheaf:specialized-bindings result))))
+  (let ((nodes (lifted-bindings (defunctionalized "closures") (fixture-symbol "closures" "SUM-TO"))))
+    (is (plusp (length nodes)))
+    (dolist (node nodes)
+      (is (zerop (count-nodes-in node #'union-match-p))))))
 
 (defun count-nodes-in (root predicate)
   (let ((count 0))
@@ -91,6 +96,18 @@
                                     (when (funcall predicate n) (incf count))
                                     (values))))
     count))
+
+(test a-function-as-a-type-argument-keeps-its-type
+  (let ((types (specializations-of (defunctionalized "flows") (fixture-symbol "flows" "USE-OPTION"))))
+    (is (= 2 (length types)))
+    (is (every (lambda (type) (search "OPTIONAL FN" type)) types))))
+
+(test a-call-no-lambda-reaches-is-dead-code
+  (let ((nodes (lifted-bindings (defunctionalized "flows") (fixture-symbol "flows" "USE-OPTION"))))
+    (is (some (lambda (node) (plusp (count-nodes-in node (lambda (n)
+                                                           (and (typep n 'ast:node-match)
+                                                                (null (ast:node-match-branches n)))))))
+              nodes))))
 
 (test higher-order-function-specialized-per-lambda-set
   (is (= 2 (length (specializations-of (defunctionalized "closures")

@@ -710,6 +710,9 @@ to; they are rebuilt where used, so are not captured."
 (defun ctype-key (ctype deep &optional path)
   "A key equal for equal ctypes. DEEP also keys the arguments and results of
 function types, which the lambda sets alone do not fix."
+  ;; TODO: isomorphic cyclic graphs entered at different nodes key differently;
+  ;; minimise by bisimulation before keying.
+  ;; https://todo.sr.ht/~takeiteasy/sheaf/21
   (etypecase ctype
     (atom-ctype (type-key (atom-ctype-ty ctype)))
     (ctype
@@ -954,42 +957,46 @@ not trivial around the result."
                                        :name (car binding) :expr (cdr binding) :body body))))))
 
 (defun dispatch (fn ctype args location)
-  "A call of the function value FN, a node of union type CTYPE, with the nodes ARGS."
-  (let ((cases (fn-ctype-cases ctype))
-        (result (fn-ctype-ret ctype))
-        (union (ctype-ty ctype)))
-    (when (null cases)
-      (unsupported "a call that no lambda reaches"))
-    (with-bound args
-      (lambda (args)
-        (flet ((call (lam captures cap-nodes)
-                 (let ((symbol (if (lam-target lam)
-                                   (request-instance :binding (gethash (lam-target lam) *binfos*)
-                                                     '() (fn-ctype-args ctype) result)
-                                   (request-instance :lam lam captures (fn-ctype-args ctype) result))))
-                   (ast:make-node-direct-application
-                    :type (ctype-ty result) :location location :properties '()
-                    :rator-type (instance-type captures (fn-ctype-args ctype) result)
-                    :rator symbol :rands (append cap-nodes args) :keyword-rands '()))))
-          (if (and (null (rest cases)) (null (cdr (first cases))) (trivial-node-p fn))
-              (call (car (first cases)) '() '())
-              (ast:make-node-match
-               :type (ctype-ty result) :location location :expr fn
-               :branches
-               (loop :for (lam . captures) :in cases
-                     :for constructor :in (tinfo-ctors (union-info ctype))
-                     :collect (let ((names (loop :for nil :in captures :collect (gensym "CAPTURE"))))
-                                (ast:make-match-branch
-                                 :pattern (pattern:make-pattern-constructor
-                                           :type union :name constructor
-                                           :patterns (loop :for name :in names
-                                                           :for capture :in captures
-                                                           :collect (pattern:make-pattern-var
-                                                                     :type (ctype-ty capture) :name name)))
-                                 :body (call lam captures
-                                             (loop :for name :in names
-                                                   :for capture :in captures
-                                                   :collect (local-ref name capture location)))))))))))))
+  "A call of the function value FN, a node of union type CTYPE, with the nodes ARGS.
+FN is evaluated before ARGS, as in the call it replaces."
+  (let* ((cases (fn-ctype-cases ctype))
+         (result (fn-ctype-ret ctype))
+         (union (ctype-ty ctype))
+         (bind-fn-p (not (trivial-node-p fn))))
+    (with-bound (if bind-fn-p (cons fn args) args)
+      (lambda (refs)
+        (let ((fn (if bind-fn-p (first refs) fn))
+              (args (if bind-fn-p (rest refs) refs)))
+          (labels ((call (lam captures cap-nodes)
+                   (let ((symbol (if (lam-target lam)
+                                     (request-instance :binding (gethash (lam-target lam) *binfos*)
+                                                       '() (fn-ctype-args ctype) result)
+                                     (request-instance :lam lam captures (fn-ctype-args ctype) result))))
+                     (ast:make-node-direct-application
+                      :type (ctype-ty result) :location location :properties '()
+                      :rator-type (instance-type captures (fn-ctype-args ctype) result)
+                      :rator symbol :rands (append cap-nodes args) :keyword-rands '())))
+                 (branch (lam captures constructor)
+                   (let ((names (loop :for nil :in captures :collect (gensym "CAPTURE"))))
+                     (ast:make-match-branch
+                      :pattern (pattern:make-pattern-constructor
+                                :type union :name constructor
+                                :patterns (loop :for name :in names
+                                                :for capture :in captures
+                                                :collect (pattern:make-pattern-var
+                                                          :type (ctype-ty capture) :name name)))
+                      :body (call lam captures
+                                  (loop :for name :in names
+                                        :for capture :in captures
+                                        :collect (local-ref name capture location)))))))
+            (if (and cases (null (rest cases)) (null (cdr (first cases))) (trivial-node-p fn))
+                (call (car (first cases)) '() '())
+                ;; A union no lambda reaches is dead code: a match with no branches.
+                (ast:make-node-match
+                 :type (ctype-ty result) :location location :expr fn
+                 :branches (loop :for (lam . captures) :in cases
+                                 :for constructor :in (tinfo-ctors (union-info ctype))
+                                 :collect (branch lam captures constructor))))))))))
 
 (defun rewrite-pattern (pattern)
   (let* ((ctype (materialize (gethash pattern *shapes*)))
