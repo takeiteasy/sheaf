@@ -26,7 +26,8 @@ as lists of a name, a type and a source location."))
   "A program specialized at ground types, with no type-class dictionaries."
   (bindings (make-hash-table :test 'eq) :type hash-table :read-only t)
   (origins (make-hash-table :test 'eq) :type hash-table :read-only t)
-  (root nil :type symbol))
+  (root nil :type symbol)
+  (environment entry:*global-environment* :type tc:environment))
 
 (defun specialized-origin (specialized name)
   "The global the specialization NAME was made from, and its ground type."

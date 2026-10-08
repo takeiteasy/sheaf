@@ -24,6 +24,7 @@
    #:specialized
    #:specialized-bindings
    #:specialized-root
+   #:specialized-environment
    #:specialized-origin
    #:monomorphize
    #:check-monomorphic))
