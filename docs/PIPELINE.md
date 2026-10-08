@@ -1,19 +1,20 @@
 # Pipeline
 
 Sheaf uses Coalton as its frontend: Coalton parses and typechecks, and Sheaf
-takes over from the typed IR. Only the first stage exists today.
+takes over from the typed IR. The first two stages exist today.
 
 | Stage | Does | Status |
 |---|---|---|
 | Coalton frontend | Parses, typechecks and translates to codegen IR | Coalton fork |
-| Capture | Records each binding's IR before Coalton optimizes it | `src/ir.lisp` |
-| Monomorphization | Specializes every binding at concrete types; resolves dictionaries | planned |
+| Capture | Records each binding's IR before Coalton optimizes it | `ir.lisp` |
+| Monomorphization | Specializes every binding at ground types; removes dictionaries ([MONOMORPHIZATION.md](MONOMORPHIZATION.md)) | `monomorphize.lisp` |
 | Defunctionalization | Turns function values into tagged unions ([CLOSURES.md](CLOSURES.md)) | planned |
 | Analyses | Roots, data stack assignment ([MEMORY.md](MEMORY.md)) | planned |
 | C emitter | One C file per program | planned |
 
-Programs still compile and run on SBCL through Coalton's own backend, so the
-REPL keeps working while Sheaf's native backend is built.
+Coalton's own backend is the development tier: programs compile and run on
+SBCL through it, and the REPL works there. Sheaf's checks are meant to run on
+that path too, so both accept the same programs.
 
 ## Capture
 
@@ -46,7 +47,8 @@ that expands to it, such as `assert`.
 - Some nodes have no location: [#15](https://todo.sr.ht/~takeiteasy/sheaf/15).
 - Raw Lisp in user code, such as an `assert`, has no native translation:
   [#16](https://todo.sr.ht/~takeiteasy/sheaf/16).
-- Monomorphization: [#1](https://todo.sr.ht/~takeiteasy/sheaf/1).
+- The SBCL path does not run Sheaf's checks yet:
+  [#17](https://todo.sr.ht/~takeiteasy/sheaf/17).
 - Root checking and stack assignment:
   [#4](https://todo.sr.ht/~takeiteasy/sheaf/4),
   [#5](https://todo.sr.ht/~takeiteasy/sheaf/5).

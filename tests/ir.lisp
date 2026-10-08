@@ -4,16 +4,11 @@
 
 (in-suite sheaf)
 
-(defvar *counter* nil)
-
 (defun counter ()
-  (or *counter*
-      (setf *counter*
-            (sheaf:compile-program
-             (asdf:system-relative-pathname "sheaf" "tests/fixtures/counter.lisp")))))
+  (fixture-program "counter"))
 
 (defun fixture (name)
-  (find-symbol name "SHEAF/FIXTURES/COUNTER"))
+  (fixture-symbol "counter" name))
 
 (defun count-lisp-nodes (node)
   (let ((n 0))

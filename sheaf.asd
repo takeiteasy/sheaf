@@ -6,10 +6,10 @@
   :license "GPL-3.0-or-later"
   :version "0.0.1"
   :depends-on (#:coalton)
-  :pathname "src/"
   :serial t
   :components ((:file "package")
-               (:file "ir"))
+               (:file "ir")
+               (:file "monomorphize"))
   :in-order-to ((asdf:test-op (asdf:test-op #:sheaf/tests))))
 
 (asdf:defsystem #:sheaf/tests
@@ -17,5 +17,6 @@
   :pathname "tests/"
   :serial t
   :components ((:file "package")
-               (:file "ir"))
+               (:file "ir")
+               (:file "monomorphize"))
   :perform (asdf:test-op (o c) (uiop:symbol-call '#:sheaf/tests '#:run)))
