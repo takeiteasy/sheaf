@@ -4,7 +4,7 @@ Sheaf has no heap and no garbage collector. Every value lives on the native
 stack, in static data, or on one of a few **data stacks**, and memory is
 freed when the scope that owns it ends. The model follows
 [Goose](https://github.com/aardappel/goose)[^goose]. Data stack assignment
-runs ([STACKS.md](STACKS.md)); roots do not yet ([STATUS.md](STATUS.md)).
+and root checking run ([STACKS.md](STACKS.md), [ROOTS.md](ROOTS.md)).
 
 ## Data stacks
 
@@ -28,10 +28,12 @@ destination. The compiler infers roots per specialization, so a program
 never writes a lifetime.
 
 ```lisp
-(let ((outer (cell:new None)))
-  (let ((inner (cell:new 0)))
-    (cell:write! outer (Some inner))))   ; error: inner does not outlive outer
+(let ((outer (arr:new 1 (arr:ref base 0))))
+  (let ((inner (arr:new 1 0)))
+    (arr:set! outer 0 (arr:ref inner 0))))   ; error: inner does not outlive outer
 ```
+
+[ROOTS.md](ROOTS.md) has the rules.
 
 ## Where a value is built
 
@@ -53,14 +55,14 @@ recursive call, as Goose rejects it.
 
 Coalton's immutable data reads the same whether it is copied or shared, so
 Sheaf can treat it as plain values without changing what a program means.
-The mutable types (`Cell`, `Vector`, `Hashtable`) stay references and obey
-the root rule. Lists are cons cells in a pool, linked by relative
+The mutable types (`Cell`, `Vector`, `Hashtable`) stay references and are meant
+to obey the root rule, which does not check them yet. Lists are cons cells in a pool, linked by relative
 references.
 
 ## Limitations
 
-- The meaning of `Cell`, `Vector` and `Hashtable` is open:
-  [#8](https://todo.sr.ht/~takeiteasy/sheaf/8).
+- The meaning of `Cell`, `Vector` and `Hashtable` is open, and root checking
+  skips them: [#8](https://todo.sr.ht/~takeiteasy/sheaf/8).
 - Cells are linked by C pointers, not relative references:
   [#26](https://todo.sr.ht/~takeiteasy/sheaf/26).
 - A loop that allocates on every iteration and never exits grows without

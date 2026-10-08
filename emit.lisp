@@ -58,9 +58,6 @@
   (format nil "T~d" (or (gethash type *c-types*)
                         (setf (gethash type *c-types*) (hash-table-count *c-types*)))))
 
-(defun type-text (type)
-  (format nil "~{~a~^ ~}" (cons (ir-type-name type) (ir-type-args type))))
-
 (defun c-type (type)
   (ecase (ir-type-kind type)
     (:scalar (if (ufix-type-p type)

@@ -22,6 +22,7 @@
    #:*specialization-limit*
    #:specialization-error
    #:specialization-error-chain
+   #:specialization-error-message
    #:specialized
    #:specialized-bindings
    #:specialized-root
@@ -44,6 +45,8 @@
    #:walk-ir
    #:assign-stacks
    #:check-assigned
+   #:check-roots
+   #:root-summary #:root-summary-result #:root-summary-stores #:root-summary-locals
    #:emit-c
    #:write-c
    #:size-class

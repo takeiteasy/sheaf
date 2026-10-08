@@ -17,6 +17,13 @@
   (print-unreadable-object (type stream :type t)
     (format stream "~{~a~^ ~}" (cons (ir-type-name type) (ir-type-args type)))))
 
+(defun type-text (type)
+  "TYPE as text, for messages."
+  (format nil "~a~{ ~a~}" (ir-type-name type)
+          (mapcar (lambda (arg)
+                    (if (ir-type-args arg) (format nil "(~a)" (type-text arg)) (type-text arg)))
+                  (ir-type-args type))))
+
 (defstruct (ir-constructor (:constructor make-ir-constructor (name tag fields)))
   "A constructor of a data type, its position in the type and its field types."
   (name nil :type symbol :read-only t)

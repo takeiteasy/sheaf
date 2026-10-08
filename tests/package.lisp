@@ -9,6 +9,7 @@
    (#:pattern #:coalton-impl/codegen/pattern)
    (#:entry #:coalton-impl/entry)
    (#:settings #:coalton-impl/settings)
+   (#:source #:coalton-impl/source)
    (#:tc #:coalton-impl/typechecker)
    (#:traverse #:coalton-impl/codegen/traverse))
   (:export #:run))

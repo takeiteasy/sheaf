@@ -71,7 +71,7 @@ freed.
 
 - Size classes are provisional: [#24](https://todo.sr.ht/~takeiteasy/sheaf/24).
 - A cell goes in the destination when anything it holds may reach the result,
-  and stores through a `Cell` are not followed:
+  and stores through a `Cell` or into an array are not followed:
   [#25](https://todo.sr.ht/~takeiteasy/sheaf/25).
 - A cycle keeps what it allocates until the call into it returns:
   [#11](https://todo.sr.ht/~takeiteasy/sheaf/11).

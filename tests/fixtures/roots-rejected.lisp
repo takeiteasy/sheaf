@@ -1,0 +1,109 @@
+;;;; roots-rejected.lisp
+;;;; Each root stores a reference into storage that outlives its root.
+
+(defpackage #:sheaf/fixtures/roots-rejected
+  (:use #:coalton #:coalton-prelude #:sheaf/prelude)
+  (:local-nicknames
+   (#:arr #:sheaf/prelude/arr)
+   (#:grow #:sheaf/prelude/grow)
+   (#:ref #:sheaf/prelude/ref)))
+
+(in-package #:sheaf/fixtures/roots-rejected)
+
+(coalton-toplevel
+  (declare base-global (Array UFix))
+  (define base-global (arr:new 1 0))
+
+  (declare table (Array (Ref UFix)))
+  (define table (arr:new 1 (arr:ref base-global 0)))
+
+  (declare put ((Array (Ref UFix)) * (Ref UFix) -> Unit))
+  (define (put a r)
+    (arr:set! a 0 r))
+
+  (declare leak ((Array (Ref UFix)) -> Unit))
+  (define (leak outer)
+    (let ((inner (arr:new 1 0)))
+      (arr:set! outer 0 (arr:ref inner 0))))
+
+  (declare even-put (UFix * (Array (Ref UFix)) * (Ref UFix) -> Unit))
+  (define (even-put n a r)
+    (if (== n 0)
+        (arr:set! a 0 r)
+        (odd-put (- n 1) a r)))
+
+  (declare odd-put (UFix * (Array (Ref UFix)) * (Ref UFix) -> Unit))
+  (define (odd-put n a r)
+    (even-put n a r))
+
+  (declare ref-set-inner (Void -> UFix))
+  (define (ref-set-inner)
+    (let ((base (arr:new 1 0)))
+      (let ((outer (arr:new 1 (arr:ref base 0))))
+        (let ((slot (arr:ref outer 0)))
+          (let ((inner (arr:new 1 0)))
+            (ref:set! slot (arr:ref inner 0))
+            0)))))
+
+  (declare arr-set-inner (Void -> UFix))
+  (define (arr-set-inner)
+    (let ((base (arr:new 1 0)))
+      (let ((outer (arr:new 1 (arr:ref base 0))))
+        (let ((inner (arr:new 1 0)))
+          (arr:set! outer 0 (arr:ref inner 0))
+          0))))
+
+  (declare push-inner (Void -> UFix))
+  (define (push-inner)
+    (let ((outer (the (GrowArray (Ref UFix)) (grow:new))))
+      (let ((inner (arr:new 1 0)))
+        (grow:push! outer (arr:ref inner 0))
+        0)))
+
+  (declare store-through-call (Void -> UFix))
+  (define (store-through-call)
+    (let ((base (arr:new 1 0)))
+      (let ((outer (arr:new 1 (arr:ref base 0))))
+        (let ((inner (arr:new 1 0)))
+          (put outer (arr:ref inner 0))
+          0))))
+
+  (declare store-into-param (Void -> UFix))
+  (define (store-into-param)
+    (let ((base (arr:new 1 0)))
+      (let ((outer (arr:new 1 (arr:ref base 0))))
+        (leak outer)
+        0)))
+
+  (declare store-into-global (Void -> UFix))
+  (define (store-into-global)
+    (let ((inner (arr:new 1 0)))
+      (arr:set! table 0 (arr:ref inner 0))
+      0))
+
+  (declare escape-branch (Void -> UFix))
+  (define (escape-branch)
+    (let ((base (arr:new 1 0)))
+      (let ((r (if (== 1 1)
+                   (let ((a (arr:new 1 0)))
+                     (arr:ref a 0))
+                   (arr:ref base 0))))
+        (ref:get r))))
+
+  (declare escape-grown (Void -> UFix))
+  (define (escape-grown)
+    (let ((base (arr:new 1 0)))
+      (let ((r (if (== 1 1)
+                   (let ((g (the (GrowArray UFix) (grow:new))))
+                     (grow:push! g 7)
+                     (arr:ref g 0))
+                   (arr:ref base 0))))
+        (ref:get r))))
+
+  (declare recursive-store (Void -> UFix))
+  (define (recursive-store)
+    (let ((base (arr:new 1 0)))
+      (let ((outer (arr:new 1 (arr:ref base 0))))
+        (let ((inner (arr:new 1 0)))
+          (odd-put 3 outer (arr:ref inner 0))
+          0)))))

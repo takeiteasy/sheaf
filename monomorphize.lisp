@@ -11,12 +11,12 @@
   ((message :initarg :message :reader specialization-error-message)
    (chain :initarg :chain :initform '() :reader specialization-error-chain
           :documentation "The requests leading to the error, outermost first,
-as lists of a name, a type and a source location."))
+as lists of a name, a type or a description of it, and a source location."))
   (:report (lambda (condition stream)
              (write-string (specialization-error-message condition) stream)
              (loop :for (name type location) :in (specialization-error-chain condition)
                    :do (format stream "~%  ~s at ~a~@[, offset ~d~]"
-                               name (tc:type-to-string type)
+                               name (if (stringp type) type (tc:type-to-string type))
                                (and location (source:span-start (source:location-span location))))))))
 
 (defun specialization-error (chain control &rest args)
