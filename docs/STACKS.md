@@ -18,6 +18,7 @@ ends, and a returned value is built in its caller's destination.
 | A cell that may reach its function's result | The function's destination, chosen by its caller |
 | Any other cell | The function's own pool, taken on entry and freed on exit |
 | A call's result | The destination if it may reach the caller's result, otherwise the caller's pool |
+| An array | By its size class: a growable as below, any other like a cell |
 | A growable local | A stack of its own for the rest of its `let`; a returned one uses the destination |
 
 ```lisp
@@ -55,6 +56,7 @@ that call takes for itself when the result holds no storage[^region].
 | `ir-call-destination` | The stack a storage-holding result is built on |
 | `ir-call-region` | A region the call takes and frees |
 | `ir-let-stack` | The stack a growable local owns |
+| `ir-prim-stack` | The stack an array is pushed to |
 | `ir-def-pool` | The pool a clone owns |
 | `ir-def-destination` | The destination a clone's result is built on |
 | `ir-def-source` | The def a clone was cloned from |

@@ -53,8 +53,9 @@ enclosing node's.
 | `lowered-root` | The root's name |
 | `lowered-stack-count` | The stacks the program needs, once assigned ([STACKS.md](STACKS.md)); otherwise `nil` |
 
-A type is an `ir-type` of kind `:scalar`, `:data` or `:reference` (`Cell`,
-`Vector`, `Hashtable`), and equal types are the same object.
+A type is an `ir-type` of kind `:scalar`, `:data`, `:reference` (`Cell`,
+`Vector`, `Hashtable`), `:storage` (the prelude's arrays) or `:view` (`Slice`
+and `Ref`), and equal types are the same object.
 
 | Function | Does |
 |---|---|
@@ -68,6 +69,9 @@ A type is an `ir-type` of kind `:scalar`, `:data` or `:reference` (`Cell`,
 Instance methods in `*primitives*` become `ir-prim` and have no def: UFix
 `+`, `-`, `*`, `==`, `<=>` and `fromInt`, and `==` on `Ordering`. `fromInt` of
 a literal becomes a UFix literal.
+
+The operations of the prelude ([PRELUDE.md](PRELUDE.md)) are `ir-prim`s as
+well. An allocating one holds the stack it pushes to in `ir-prim-stack`.
 
 ## Limitations
 

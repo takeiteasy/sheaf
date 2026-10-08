@@ -23,8 +23,11 @@
 ;; in a pool, and nothing is variable-size.
 ;; https://todo.sr.ht/~takeiteasy/sheaf/24
 (defun size-class (type)
-  "TYPE's size class, `:fixed` or `:resizable`."
-  (if (member (ir-type-name type) *resizable-types*) :resizable :fixed))
+  "TYPE's size class: `:fixed`, `:variable` or `:resizable`."
+  (case (prelude-class type)
+    ((:grow :grow-shrink) :resizable)
+    (:variable :variable)
+    (t (if (member (ir-type-name type) *resizable-types*) :resizable :fixed))))
 
 (defun field-types (type)
   (loop :for constructor :in (lowered-constructors *lowered* type)
@@ -49,12 +52,13 @@
         known
         (setf (gethash type *storage*)
               (or (eq (size-class type) :resizable)
+                  (member (ir-type-kind type) '(:storage :view))
                   (pooled-p type)
                   (and (some #'holds-storage-p
                              (ecase (ir-type-kind type)
                                (:data (field-types type))
                                (:reference (ir-type-args type))
-                               (:scalar '())))
+                               ((:scalar :storage :view) '())))
                        t))))))
 
 (defun resizable-node-p (node)
@@ -131,7 +135,8 @@
 its own holds."
   (labels ((scan (node reaches)
              (etypecase node
-               ((or ir-atom ir-prim ir-foreign) nil)
+               ((or ir-atom ir-foreign) nil)
+               (ir-prim (and (not reaches) (primitive-allocates (ir-prim-op node)) t))
                (ir-let (or (and (not (resizable-node-p (ir-let-value node)))
                                 (scan (ir-let-value node) (gethash (ir-let-name node) reached)))
                            (scan (ir-let-body node) reaches)))
@@ -148,6 +153,7 @@ its own holds."
                (when (typecase node
                        (ir-construct (pooled-p (ir-node-type node)))
                        (ir-call (holds-storage-p (ir-node-type node)))
+                       (ir-prim (primitive-allocates (ir-prim-op node)))
                        (ir-let (resizable-node-p (ir-let-value node))))
                  (return-from found t)))
              (ir-def-body def))
@@ -265,6 +271,8 @@ built on, the region its cycle allocates in, and the stacks in use on entry."
                  (ir-prim
                   (let ((copy (copy-ir-prim node)))
                     (setf (ir-prim-args copy) (mapcar #'rewrite-atom (ir-prim-args node)))
+                    (when (primitive-allocates (ir-prim-op node))
+                      (setf (ir-prim-stack copy) (or owner (storage-stack reaches))))
                     copy))
                  (ir-match
                   (let ((copy (copy-ir-match node)))
@@ -307,6 +315,8 @@ stack below its stack count. Returns T."
                                  (check-index (ir-call-destination node) "a call's result"))
                                (when (ir-call-region node)
                                  (check-index (ir-call-region node) "a call's region")))
+                      (ir-prim (when (primitive-allocates (ir-prim-op node))
+                                 (check-index (ir-prim-stack node) "an array")))
                       (ir-let (when (ir-let-stack node)
                                 (check-index (ir-let-stack node) "a growable local")))))
                   (ir-def-body def))

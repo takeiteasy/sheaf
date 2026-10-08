@@ -84,6 +84,7 @@ committed). A push past the end prints `data stack n exhausted` and exits.
   [#13](https://todo.sr.ht/~takeiteasy/sheaf/13).
 - Raw Lisp is an error: [#16](https://todo.sr.ht/~takeiteasy/sheaf/16),
   [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
+- Arrays, slices and references: [#27](https://todo.sr.ht/~takeiteasy/sheaf/27).
 - Only `UFix` and the data types built from it are emitted:
   [#23](https://todo.sr.ht/~takeiteasy/sheaf/23),
   [#8](https://todo.sr.ht/~takeiteasy/sheaf/8).

@@ -9,7 +9,7 @@
 (defstruct (ir-type (:constructor make-ir-type (key kind name args)))
   "A ground type. Equal types are the same object."
   (key nil :read-only t)
-  (kind :scalar :type (member :scalar :data :reference) :read-only t)
+  (kind :scalar :type (member :scalar :data :reference :storage :view) :read-only t)
   (name nil :type symbol :read-only t)
   (args '() :type list :read-only t))
 
@@ -35,7 +35,7 @@
 (defstruct (ir-let (:include ir-node)) name value body (stack nil))
 (defstruct (ir-call (:include ir-node)) function args (destination nil) (region nil))
 (defstruct (ir-construct (:include ir-node)) constructor args (stack nil))
-(defstruct (ir-prim (:include ir-node)) op args)
+(defstruct (ir-prim (:include ir-node)) op args (stack nil))
 (defstruct (ir-foreign (:include ir-node)) vars form)
 (defstruct (ir-match (:include ir-node)) scrutinee branches)
 (defstruct ir-branch pattern body)
@@ -112,14 +112,67 @@ reaches, and its root."
 
 (defvar *specialized*)
 
+;;; The prelude's array and reference operations are primitives too. Each
+;;; operation is its function's or its instance method's origin.
+
+(defparameter *prelude-ops*
+  '((:fixed-new 1 :fixed) (:array-new 2 :variable) (:grow-new 0 :resizable) (:stack-new 0 :resizable)
+    (:grow-push 2) (:stack-push 2) (:stack-pop 1)
+    (:ref-get 1) (:ref-set 2)
+    (:elements-length 1) (:elements-index 2) (:elements-set 3)
+    (:elements-ref 2) (:elements-slice 3))
+  "The operations of the prelude: the arity of each, and the size class of what it allocates.")
+
+(defparameter *prelude-functions*
+  '((sheaf/prelude/arr:new . :array-new)
+    (sheaf/prelude/grow:new . :grow-new)
+    (sheaf/prelude/grow:push! . :grow-push)
+    (sheaf/prelude/stack:new . :stack-new)
+    (sheaf/prelude/stack:push! . :stack-push)
+    (sheaf/prelude/stack:pop! . :stack-pop)
+    (sheaf/prelude/ref:get . :ref-get)
+    (sheaf/prelude/ref:set! . :ref-set)))
+
+(defparameter *prelude-classes*
+  '((sheaf/prelude/fixed:extent :fixed-new)
+    (sheaf/prelude/arr:indexed :elements-length :elements-index :elements-set)
+    (sheaf/prelude/arr:viewable :elements-ref :elements-slice))
+  "The classes whose instance methods are primitives, and the operation of each
+method in the order the class declares them.")
+
+(defvar *prelude-primitives* (make-hash-table :test 'eq)
+  "The prelude's operations by origin, for the program being lowered.")
+
+(defun prelude-primitives ()
+  (let ((table (make-hash-table :test 'eq)))
+    (loop :for (function . op) :in *prelude-functions*
+          :do (setf (gethash function table) op))
+    (loop :for (class . ops) :in *prelude-classes*
+          :do (dolist (instance (tc:lookup-class-instances entry:*global-environment* class :no-error t))
+                (loop :for symbol :in (tc:ty-class-instance-method-codegen-syms instance)
+                      :for op :in ops
+                      :do (setf (gethash symbol table) op))))
+    table))
+
 (defun primitive-of (name)
   "The operation and arity NAME is a primitive of, or NIL."
-  (let ((origin (or (specialized-origin *specialized* name) name)))
-    (values-list (gethash (symbol-name origin) *primitives*))))
+  (let* ((origin (or (specialized-origin *specialized* name) name))
+         (op (gethash origin *prelude-primitives*)))
+    (if op
+        (values op (second (assoc op *prelude-ops*)))
+        (values-list (gethash (symbol-name origin) *primitives*)))))
 
 (defun primitive-arity (op)
-  (loop :for (entry-op arity) :being :the :hash-values :of *primitives*
-        :when (eq op entry-op) :return arity))
+  (or (second (assoc op *prelude-ops*))
+      (loop :for (entry-op arity) :being :the :hash-values :of *primitives*
+            :when (eq op entry-op) :return arity)))
+
+(defun prelude-op-p (op)
+  (and (assoc op *prelude-ops*) t))
+
+(defun primitive-allocates (op)
+  "The size class of what the primitive OP allocates, or NIL."
+  (third (assoc op *prelude-ops*)))
 
 ;;; Lowering
 
@@ -138,6 +191,23 @@ reaches, and its root."
   '(coalton/cell:cell coalton/vector:vector coalton/hashtable:hashtable)
   "Types that are references to mutable storage, whose meaning is open (#8).")
 
+(defparameter *prelude-types*
+  '((sheaf/prelude:fixedarray :storage :fixed)
+    (sheaf/prelude:array :storage :variable)
+    (sheaf/prelude:growarray :storage :grow)
+    (sheaf/prelude:stack :storage :grow-shrink)
+    (sheaf/prelude:slice :view)
+    (sheaf/prelude:ref :view))
+  "The prelude's types: the kind of each, and for arrays how it is sized.")
+
+(defun prelude-class (type)
+  "How the array TYPE is sized: `:fixed`, `:variable`, `:grow` or `:grow-shrink`."
+  (third (assoc (ir-type-name type) *prelude-types*)))
+
+(defun fixed-length (type)
+  "The length of the fixed array TYPE."
+  (sheaf/prelude:fixed-length (ir-type-name (first (ir-type-args type)))))
+
 (defun lower-type (type)
   (etypecase type
     ((or tc:tycon tc:tapp)
@@ -149,11 +219,15 @@ reaches, and its root."
            (let* ((name (tc:tycon-name head))
                   (entry (tc:lookup-type entry:*global-environment* name :no-error t))
                   (kind (cond ((member name *opaque-types*) :reference)
+                              ((assoc name *prelude-types*) (second (assoc name *prelude-types*)))
                               ((and entry (or (tc:type-entry-constructors entry)
                                               (eq (symbol-package name) (find-package '#:sheaf/generated))))
                                :data)
                               (t :scalar)))
                   (ir-type (make-ir-type key kind name (mapcar #'lower-type (rest (tc:flatten-type type))))))
+             (when (and (eq name 'sheaf/prelude:fixedarray) (not (fixed-length ir-type)))
+               (lowering-error "the length type of ~a, which define-length does not declare"
+                               (tc:type-to-string type)))
              (setf (gethash key *ir-types*) ir-type)
              (when (eq kind :data)
                (push (cons ir-type type) *pending-types*))
@@ -339,6 +413,7 @@ for everything it evaluates first."
          (*specialized* specialized)
          (*ir-types* (make-hash-table :test 'equal))
          (*pending-types* '())
+         (*prelude-primitives* (prelude-primitives))
          (lowered (%make-lowered :root (specialized-root specialized))))
     (maphash (lambda (name node)
                (unless (primitive-of name)

@@ -7,6 +7,18 @@
   "A value of a data type. STACK is the data stack holding it, if it is a cell."
   constructor fields stack (freed nil))
 
+(defstruct (storage (:include datum) (:constructor make-storage (constructor fields stack)))
+  "An array. CONSTRUCTOR is how it is sized and FIELDS its elements, which are
+shared by every value that holds the array.")
+
+(defstruct (ref-value (:constructor make-ref-value (target index)))
+  "A reference to one element of the array TARGET."
+  target index)
+
+(defstruct (slice-value (:constructor make-slice-value (target start end)))
+  "A view of the elements of the array TARGET from START up to END."
+  target start end)
+
 (defstruct (data-stack (:conc-name stack-))
   "A simulated data stack: whether an owner holds it, the items it held when
 that owner took it, and the cells pushed since."
@@ -93,9 +105,92 @@ the run touched when the program has a stack assignment."
                    (error "A cell was pushed to stack ~d, which has no owner" index))
                  (push cell (stack-items stack))))
              (live (value what)
-               (when (and (datum-p value) (datum-freed value))
-                 (error "~a a cell on stack ~d after it was freed" what (datum-stack value)))
+               (let ((owner (typecase value
+                              (datum value)
+                              (ref-value (ref-value-target value))
+                              (slice-value (slice-value-target value)))))
+                 (when (and owner (datum-freed owner))
+                   (error "~a a cell on stack ~d after it was freed" what (datum-stack owner))))
                value)
+             (allocate (class elements node)
+               (let* ((stack (ir-prim-stack node))
+                      (array (make-storage class elements stack)))
+                 (when stack (push-cell stack array))
+                 array))
+             (prelude (op args node)
+               (let ((type (ir-node-type node)))
+                 (labels ((unit ()
+                            (make-datum (constructor-named lowered type "UNIT") '()))
+                          (elements (n initial)
+                            (make-array n :adjustable t :fill-pointer n :initial-element initial))
+                          (growable (array)
+                            (live array "A growable value")
+                            (let ((stack (datum-stack array)))
+                              (when (and stacks stack (not (eq array (first (stack-items (stack stack))))))
+                                (error "A growable value on stack ~d grew under another value" stack)))
+                            (datum-fields array))
+                          (view (value)
+                            "The elements VALUE views, and the range of them."
+                            (etypecase value
+                              (storage (live value "An array read")
+                               (values (datum-fields value) 0 (length (datum-fields value))))
+                              (slice-value (live value "A slice read")
+                               (values (datum-fields (slice-value-target value))
+                                       (slice-value-start value) (slice-value-end value)))))
+                          (position-in (value index)
+                            (multiple-value-bind (vector start end) (view value)
+                              (unless (< -1 index (- end start))
+                                (error "The index ~d is outside the array of ~d elements" index (- end start)))
+                              (values vector (+ start index)))))
+                   (ecase op
+                     (:fixed-new (allocate :fixed (elements (fixed-length type) (first args)) node))
+                     (:array-new (allocate :variable (elements (first args) (second args)) node))
+                     (:grow-new (allocate :grow (elements 0 nil) node))
+                     (:stack-new (allocate :grow-shrink (elements 0 nil) node))
+                     ((:grow-push :stack-push)
+                      (vector-push-extend (second args) (growable (first args)))
+                      (unit))
+                     (:stack-pop
+                      (let ((vector (growable (first args))))
+                        (if (zerop (length vector))
+                            (make-datum (constructor-named lowered type "NONE") '())
+                            (make-datum (constructor-named lowered type "SOME") (list (vector-pop vector))))))
+                     (:elements-length
+                      (multiple-value-bind (vector start end) (view (first args))
+                        (declare (ignore vector))
+                        (- end start)))
+                     (:elements-index
+                      (multiple-value-bind (vector position) (position-in (first args) (second args))
+                        (aref vector position)))
+                     (:elements-set
+                      (multiple-value-bind (vector position) (position-in (first args) (second args))
+                        (setf (aref vector position) (third args))
+                        (unit)))
+                     (:elements-ref
+                      (multiple-value-bind (vector position) (position-in (first args) (second args))
+                        (declare (ignore vector))
+                        (make-ref-value (if (typep (first args) 'storage)
+                                            (first args)
+                                            (slice-value-target (first args)))
+                                        position)))
+                     (:elements-slice
+                      (destructuring-bind (source lo hi) args
+                        (multiple-value-bind (vector start end) (view source)
+                          (declare (ignore vector))
+                          (unless (<= 0 lo hi (- end start))
+                            (error "The range ~d to ~d is outside the array of ~d elements" lo hi (- end start)))
+                          (make-slice-value (if (typep source 'storage) source (slice-value-target source))
+                                            (+ start lo) (+ start hi)))))
+                     (:ref-get
+                      (let ((ref (first args)))
+                        (live ref "A reference read")
+                        (aref (datum-fields (ref-value-target ref)) (ref-value-index ref))))
+                     (:ref-set
+                      (let ((ref (first args)))
+                        (live ref "A reference written through")
+                        (setf (aref (datum-fields (ref-value-target ref)) (ref-value-index ref))
+                              (second args))
+                        (unit)))))))
              (enter (def env)
                (let ((pool (ir-def-pool def)))
                  (when pool (claim pool))
@@ -136,9 +231,10 @@ the run touched when the program has a stack assignment."
                     (when stack (push-cell stack cell))
                     cell))
                  (ir-prim
-                  (apply-primitive lowered (ir-prim-op node)
-                                   (mapcar (lambda (arg) (evaluate arg env)) (ir-prim-args node))
-                                   (ir-node-type node)))
+                  (let ((args (mapcar (lambda (arg) (evaluate arg env)) (ir-prim-args node))))
+                    (if (prelude-op-p (ir-prim-op node))
+                        (prelude (ir-prim-op node) args node)
+                        (apply-primitive lowered (ir-prim-op node) args (ir-node-type node)))))
                  (ir-foreign (error "Raw Lisp is not evaluated: ~s" (ir-foreign-form node)))
                  (ir-match
                   (let ((value (live (evaluate (ir-match-scrutinee node) env) "A match read")))

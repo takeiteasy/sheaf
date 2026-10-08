@@ -117,7 +117,7 @@
 (test a-wrong-assignment-is-caught
   (signals error (sheaf:run-lowered (tamper "stacks"))))
 
-;;; Growable locals, which no fixture can build without raw Lisp
+;;; Growable locals of the opaque Vector type, built by hand
 
 (defvar *vector* (sheaf::make-ir-type :vector :reference 'coalton/vector:vector '()))
 (defvar *number* (sheaf::make-ir-type :number :scalar 'coalton:ufix '()))

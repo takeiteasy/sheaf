@@ -43,6 +43,8 @@ never writes a lifetime.
 A function returning a list builds that list straight into its caller's
 storage, with no copy.
 
+How sizes and references are written in types is in [PRELUDE.md](PRELUDE.md).
+
 A recursive cycle builds everything in one region, owned by the call into the
 cycle and freed when it returns. Nothing is rejected for keeping a list across a
 recursive call, as Goose rejects it.
@@ -57,8 +59,6 @@ references.
 
 ## Limitations
 
-- How sizes and references are written in types is open:
-  [#7](https://todo.sr.ht/~takeiteasy/sheaf/7).
 - The meaning of `Cell`, `Vector` and `Hashtable` is open:
   [#8](https://todo.sr.ht/~takeiteasy/sheaf/8).
 - Cells are linked by C pointers, not relative references:

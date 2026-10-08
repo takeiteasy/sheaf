@@ -61,7 +61,7 @@
    #:ir-let #:ir-let-name #:ir-let-value #:ir-let-body #:ir-let-stack
    #:ir-call #:ir-call-function #:ir-call-args #:ir-call-destination #:ir-call-region
    #:ir-construct #:ir-construct-constructor #:ir-construct-args #:ir-construct-stack
-   #:ir-prim #:ir-prim-op #:ir-prim-args
+   #:ir-prim #:ir-prim-op #:ir-prim-args #:ir-prim-stack
    #:ir-foreign #:ir-foreign-vars #:ir-foreign-form
    #:ir-match #:ir-match-scrutinee #:ir-match-branches
    #:ir-branch #:ir-branch-pattern #:ir-branch-body

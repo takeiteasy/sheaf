@@ -1,11 +1,25 @@
 ;;;; sheaf.asd
 
+(asdf:defsystem #:sheaf/prelude
+  :description "Array and reference types for Sheaf programs"
+  :license "GPL-3.0-or-later"
+  :depends-on (#:coalton)
+  :pathname "prelude/"
+  :serial t
+  :components ((:file "package")
+               (:file "types")
+               (:file "fixed")
+               (:file "arr")
+               (:file "grow")
+               (:file "stack")
+               (:file "ref")))
+
 (asdf:defsystem #:sheaf
   :description "A statically typed Lisp with no heap, built on a Coalton frontend"
   :author "George Watson <gigolo@hotmail.co.uk>"
   :license "GPL-3.0-or-later"
   :version "0.0.1"
-  :depends-on (#:coalton)
+  :depends-on (#:coalton #:sheaf/prelude)
   :serial t
   :components ((:file "package")
                (:file "ir")
@@ -27,5 +41,6 @@
                (:file "defunctionalize")
                (:file "lower")
                (:file "stacks")
-               (:file "emit"))
+               (:file "emit")
+               (:file "prelude"))
   :perform (asdf:test-op (o c) (uiop:symbol-call '#:sheaf/tests '#:run)))

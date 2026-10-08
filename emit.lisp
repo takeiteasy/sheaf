@@ -68,6 +68,8 @@
                  (emit-error "the type ~a: https://todo.sr.ht/~~takeiteasy/sheaf/23" (type-text type))))
     (:reference (emit-error "the reference type ~a: https://todo.sr.ht/~~takeiteasy/sheaf/8"
                             (type-text type)))
+    ((:storage :view) (emit-error "the array or reference type ~a: https://todo.sr.ht/~~takeiteasy/sheaf/27"
+                                  (type-text type)))
     (:data (format nil "struct ~a~:[~; *~]" (struct-name type) (pooled-p type)))))
 
 (defun emit-type-definitions (lowered)
@@ -124,6 +126,8 @@
   (format nil (if (pooled-p type) "(~a)->~a" "(~a).~a") access member))
 
 (defun prim-expr (node env)
+  (when (prelude-op-p (ir-prim-op node))
+    (emit-error "the array operation ~(~a~): https://todo.sr.ht/~~takeiteasy/sheaf/27" (ir-prim-op node)))
   (destructuring-bind (&optional a b) (mapcar (lambda (arg) (atom-expr arg env)) (ir-prim-args node))
     (let ((type (ir-node-type node)))
       (flet ((tag (name) (ir-constructor-tag (named-constructor *lowered* type name)))

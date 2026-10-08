@@ -17,6 +17,7 @@ on stacks the compiler assigns, and memory is freed when its scope ends.
 | [CLOSURES.md](docs/CLOSURES.md) | First-class functions without a heap |
 | [PIPELINE.md](docs/PIPELINE.md) | The compiler's stages, and IR capture |
 | [IR.md](docs/IR.md) | The first-order IR the analyses read |
+| [PRELUDE.md](docs/PRELUDE.md) | Arrays, slices and references |
 | [STACKS.md](docs/STACKS.md) | Assigning data stacks to cells and growable values |
 | [EMITTER.md](docs/EMITTER.md) | Emitting C and the data stack runtime |
 | [MONOMORPHIZATION.md](docs/MONOMORPHIZATION.md) | Specializing at ground types and removing dictionaries |
