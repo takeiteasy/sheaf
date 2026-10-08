@@ -46,7 +46,7 @@
    #:assign-stacks
    #:check-assigned
    #:check-roots
-   #:root-summary #:root-summary-result #:root-summary-stores #:root-summary-locals
+   #:root-summary #:root-summary-result #:root-summary-stores #:root-summary-locals #:root-summary-reached
    #:emit-c
    #:write-c
    #:size-class

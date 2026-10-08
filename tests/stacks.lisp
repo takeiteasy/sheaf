@@ -117,6 +117,36 @@
 (test a-wrong-assignment-is-caught
   (signals error (sheaf:run-lowered (tamper "stacks"))))
 
+(test storage-the-result-does-not-hold-stays-in-the-pool
+  (is (= 12 (sheaf:run-lowered (assigned "placement"))))
+  (let* ((relay (first (clones "placement" "RELAY")))
+         (pair-call (call-to relay "placement" "PAIR")))
+    (is (integerp (sheaf:ir-def-pool relay)))
+    (is (eql (sheaf:ir-def-pool relay) (sheaf:ir-call-destination pair-call)))
+    (is (not (eql (sheaf:ir-def-destination relay) (sheaf:ir-call-destination pair-call))))))
+
+(test a-call-returning-a-view-has-no-destination
+  (let ((read-second (first (clones "placement" "READ-SECOND"))))
+    (is (null (sheaf:ir-call-destination (call-to read-second "placement" "SECOND-REF"))))))
+
+(test a-value-stored-into-a-returned-array-is-built-in-the-destination
+  (let ((filled (first (clones "placement" "FILLED"))))
+    (is (integerp (sheaf:ir-def-destination filled)))
+    (is (null (sheaf:ir-def-pool filled)))
+    (is (= 3 (length (constructs filled))))
+    (dolist (construct (constructs filled))
+      (is (eql (sheaf:ir-def-destination filled) (sheaf:ir-construct-stack construct))))))
+
+(test summaries-name-the-locals-a-result-holds
+  (let ((summaries (sheaf:check-roots (lowered "placement"))))
+    (flet ((reached (name)
+             (loop :for def :being :the :hash-values :of (sheaf:lowered-defs (lowered "placement"))
+                   :when (eq (sheaf:ir-def-origin def) (fixture-symbol "placement" name))
+                     :return (sheaf:root-summary-reached (gethash (sheaf:ir-def-name def) summaries)))))
+      (is (null (reached "RELAY")))
+      (is (= 4 (length (reached "FILLED"))))
+      (is (= 2 (length (reached "PAIR")))))))
+
 ;;; Growable locals of the opaque Vector type, built by hand
 
 (defvar *vector* (sheaf::make-ir-type :vector :reference 'coalton/vector:vector '()))

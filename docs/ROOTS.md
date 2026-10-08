@@ -2,7 +2,7 @@
 
 `check-roots` rejects a program that stores a reference where its root does
 not outlive the storage. It reads the lowered IR ([IR.md](IR.md)) and needs no
-stack assignment ([STACKS.md](STACKS.md)).
+stack assignment; stack assignment ([STACKS.md](STACKS.md)) uses its summaries.
 
 ```lisp
 (let ((ir (sheaf:lower (sheaf:defunctionalize (sheaf:monomorphize program 'my-package::main)))))
@@ -32,11 +32,12 @@ A store inside a callee also names the call.
 | A `Ref` or `Slice` | The roots of the array it points into |
 | A parameter | The caller's argument |
 | A global | A global |
+| A list or other self-containing data | The `let` that builds it, which holds the roots of its fields |
 | A tuple or other data | Every root of the references it holds |
 | A value read out of an array | The roots of the array[^inexact] |
 
-Only values that are, or hold, an array, slice, reference or `Cell` have roots.
-A list of `UFix` has none. `Vector` and `Hashtable` have none either
+Only values that are, or hold, storage have roots: an array, slice, reference,
+`Cell` or list. A `UFix` has none. `Vector` and `Hashtable` have none either
 ([#29](https://todo.sr.ht/~takeiteasy/sheaf/29),
 [#30](https://todo.sr.ht/~takeiteasy/sheaf/30)).
 
@@ -56,8 +57,8 @@ local.
 | A local | A local made no later than it | Accepted |
 | A local | A parameter, a global, or an older local | Error |
 
-A value that leaves a `match` branch may not be rooted in a local the branch
-makes.
+A value that leaves a `match` branch may not be rooted in an array, `Cell` or
+reference the branch makes, and a list or other cell does not count.
 
 ## Summaries
 
@@ -69,6 +70,7 @@ check the stores it leaves for them.
 | `root-summary-result` | What the result may point into: parameter numbers, `:global`, `:fresh` for storage built in the caller's destination |
 | `root-summary-stores` | Each store the function makes of one parameter into another or into a global |
 | `root-summary-locals` | The roots of every name in the function |
+| `root-summary-reached` | The locals whose storage the result holds, which stack assignment builds in the caller's destination |
 
 ```lisp
 (define (put a r) (arr:set! a 0 r))   ; stores parameter 1 into parameter 0
@@ -81,15 +83,13 @@ errors.
 
 A function may return a reference into an array it builds: the array is built
 in the caller's destination ([STACKS.md](STACKS.md)). A returned array may not
-hold a reference into another local.
+hold a reference into another local. A list or other cell may.
 
 ## Limitations
 
 - `Vector` and `Hashtable` are not checked:
   [#29](https://todo.sr.ht/~takeiteasy/sheaf/29),
   [#30](https://todo.sr.ht/~takeiteasy/sheaf/30).
-- Stack assignment does not use roots, and does not follow stores into arrays:
-  [#25](https://todo.sr.ht/~takeiteasy/sheaf/25).
 - The return-storage and branch-escape rules reject some safe programs:
   [#28](https://todo.sr.ht/~takeiteasy/sheaf/28).
 - The SBCL path does not run the check:

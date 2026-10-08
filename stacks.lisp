@@ -12,6 +12,7 @@
 (defvar *globals*)
 (defvar *global-busy*)
 (defvar *stack-count*)
+(defvar *summaries*)
 
 ;;; Storage
 
@@ -52,8 +53,6 @@
         known
         (setf (gethash type *storage*)
               (or (eq (size-class type) :resizable)
-                  ;; TODO: a view holds storage only through the array it points into; roots (#4) can tell
-                  ;; https://todo.sr.ht/~takeiteasy/sheaf/25
                   (member (ir-type-kind type) '(:storage :view))
                   (pooled-p type)
                   (and (some #'holds-storage-p
@@ -77,60 +76,16 @@
                   (pattern-bindings (ir-pas-pattern pattern))))
     (ir-pcon (mapcan #'pattern-bindings (ir-pcon-patterns pattern)))))
 
-(defun locals-of (atoms)
-  (loop :for atom :in atoms
-        :when (typep atom 'ir-local) :collect (ir-local-name atom)))
+(defun fresh-p (name)
+  "Whether the result of the def NAME holds storage it builds, which goes in the destination."
+  (and (member :fresh (root-summary-result (gethash name *summaries*))) t))
 
-(defun flowing-locals (node)
-  "The locals whose contents the value of NODE may hold."
-  (etypecase node
-    (ir-local (list (ir-local-name node)))
-    ((or ir-literal ir-global) '())
-    (ir-let (flowing-locals (ir-let-body node)))
-    (ir-construct (locals-of (ir-construct-args node)))
-    (ir-call (locals-of (ir-call-args node)))
-    (ir-prim (locals-of (ir-prim-args node)))
-    (ir-foreign (mapcar #'cdr (ir-foreign-vars node)))
-    (ir-match (mapcan (lambda (branch) (flowing-locals (ir-branch-body branch)))
-                      (ir-match-branches node)))))
-
-;; TODO: a value reaches the result when any storage-holding value flows into
-;; it, so a cell may be built in the result's destination that roots would let
-;; a local pool hold. Stores through a Cell are not followed.
-;; https://todo.sr.ht/~takeiteasy/sheaf/25
-(defun reaching-names (def)
-  "A set of the names in DEF whose values may reach its result."
-  (let ((flows (make-hash-table :test 'eq)))
-    (labels ((flow (to from)
-               (when from
-                 (setf (gethash to flows) (append from (gethash to flows)))))
-             (collect (node)
-               (etypecase node
-                 ((or ir-atom ir-construct ir-call ir-prim ir-foreign))
-                 (ir-let
-                  (when (holds-storage-p (ir-node-type (ir-let-value node)))
-                    (flow (ir-let-name node) (flowing-locals (ir-let-value node))))
-                  (collect (ir-let-value node))
-                  (collect (ir-let-body node)))
-                 (ir-match
-                  (let ((scrutinee (ir-match-scrutinee node)))
-                    (dolist (branch (ir-match-branches node))
-                      (when (typep scrutinee 'ir-local)
-                        (loop :for (name . type) :in (pattern-bindings (ir-branch-pattern branch))
-                              :when (holds-storage-p type)
-                                :do (flow name (list (ir-local-name scrutinee)))))
-                      (collect (ir-branch-body branch))))))))
-      (collect (ir-def-body def))
-      (when (holds-storage-p (ir-def-result def))
-        (flow :result (flowing-locals (ir-def-body def)))))
-    (let ((reached (make-hash-table :test 'eq))
-          (pending (list :result)))
-      (loop :while pending
-            :do (dolist (from (gethash (pop pending) flows))
-                  (unless (gethash from reached)
-                    (setf (gethash from reached) t)
-                    (push from pending))))
-      reached)))
+(defun reached-table (def)
+  "A set of the names in DEF whose storage its result holds."
+  (let ((reached (make-hash-table :test 'eq)))
+    (dolist (name (root-summary-reached (gethash (ir-def-name def) *summaries*)))
+      (setf (gethash name reached) t))
+    reached))
 
 (defun local-site-p (def reached)
   "Whether DEF builds storage that does not reach its result, which a pool of
@@ -143,10 +98,10 @@ its own holds."
                                 (scan (ir-let-value node) (gethash (ir-let-name node) reached)))
                            (scan (ir-let-body node) reaches)))
                (ir-construct (and (not reaches) (pooled-p (ir-node-type node))))
-               (ir-call (and (not reaches) (holds-storage-p (ir-node-type node))))
+               (ir-call (and (not reaches) (fresh-p (ir-call-function node))))
                (ir-match (some (lambda (branch) (scan (ir-branch-body branch) reaches))
                                (ir-match-branches node))))))
-    (scan (ir-def-body def) (holds-storage-p (ir-def-result def)))))
+    (scan (ir-def-body def) (fresh-p (ir-def-name def)))))
 
 (defun builds-storage-p (def)
   "Whether DEF builds any storage at all."
@@ -154,7 +109,7 @@ its own holds."
     (walk-ir (lambda (node)
                (when (typecase node
                        (ir-construct (pooled-p (ir-node-type node)))
-                       (ir-call (holds-storage-p (ir-node-type node)))
+                       (ir-call (fresh-p (ir-call-function node)))
                        (ir-prim (primitive-allocates (ir-prim-op node)))
                        (ir-let (resizable-node-p (ir-let-value node))))
                  (return-from found t)))
@@ -213,7 +168,7 @@ built on, the region its cycle allocates in, and the stacks in use on entry."
 
 (defun assign-def (def clone destination region entry-busy)
   (let* ((cycle (gethash (ir-def-name def) *cycles*))
-         (reached (reaching-names def))
+         (reached (reached-table def))
          (pool (if cycle
                    region
                    (and (local-site-p def reached) (take-index entry-busy))))
@@ -231,7 +186,7 @@ built on, the region its cycle allocates in, and the stacks in use on entry."
              (rewrite-call (node reaches busy owner)
                (let* ((callee (ir-call-function node))
                       (callee-cycle (gethash callee *cycles*))
-                      (dest (and (holds-storage-p (ir-node-type node))
+                      (dest (and (fresh-p callee)
                                  (or owner (storage-stack reaches))))
                       (copy (copy-ir-call node)))
                  (setf (ir-call-args copy) (mapcar #'rewrite-atom (ir-call-args node))
@@ -291,7 +246,7 @@ built on, the region its cycle allocates in, and the stacks in use on entry."
             (ir-def-destination new) destination
             (ir-def-pool new) (and (not cycle) pool)
             (ir-def-body new) (rewrite (ir-def-body def)
-                                       (holds-storage-p (ir-def-result def))
+                                       (fresh-p (ir-def-name def))
                                        (with-index entry-busy pool)
                                        nil))
       new)))
@@ -313,7 +268,7 @@ stack below its stack count. Returns T."
                     (typecase node
                       (ir-construct (when (pooled-p (ir-node-type node))
                                       (check-index (ir-construct-stack node) "a cell")))
-                      (ir-call (when (holds-storage-p (ir-node-type node))
+                      (ir-call (when (ir-def-destination (gethash (ir-call-function node) (lowered-defs lowered)))
                                  (check-index (ir-call-destination node) "a call's result"))
                                (when (ir-call-region node)
                                  (check-index (ir-call-region node) "a call's region")))
@@ -338,6 +293,7 @@ called in, so every stack index is a constant. Returns the new program, whose
          (*storage* (make-hash-table :test 'eq))
          (*clones* (make-hash-table :test 'equal))
          (*defs* (make-hash-table :test 'eq))
+         (*summaries* (root-summaries lowered))
          (*cycles* (find-cycles defs))
          (*globals* (make-hash-table :test 'eq))
          (*global-busy* '())

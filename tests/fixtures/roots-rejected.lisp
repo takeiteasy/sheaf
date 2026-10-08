@@ -54,6 +54,13 @@
           (arr:set! outer 0 (arr:ref inner 0))
           0))))
 
+  (declare store-list-inner (Void -> UFix))
+  (define (store-list-inner)
+    (let ((outer (arr:new 1 (the (List UFix) Nil))))
+      (let ((inner (Cons 1 Nil)))
+        (arr:set! outer 0 inner)
+        0)))
+
   (declare cell-write-inner (Void -> UFix))
   (define (cell-write-inner)
     (let ((base (arr:new 1 0)))

@@ -59,6 +59,12 @@
     (dolist (node (allocating-prims-of clone))
       (is (eql (sheaf:ir-def-destination clone) (sheaf:ir-prim-stack node))))))
 
+(test a-cell-a-returned-closure-holds-is-built-in-the-destination
+  (let ((clone (first (clones "cells" "MAKE-COUNTER"))))
+    (is (integerp (sheaf:ir-def-destination clone)))
+    (dolist (node (allocating-prims-of clone))
+      (is (eql (sheaf:ir-def-destination clone) (sheaf:ir-prim-stack node))))))
+
 (test a-cell-that-is-dropped-is-built-in-a-pool
   (let ((clone (first (clones "cells" "LOCAL-SUM"))))
     (is (null (sheaf:ir-def-destination clone)))
