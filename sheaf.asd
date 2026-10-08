@@ -10,7 +10,9 @@
   :components ((:file "package")
                (:file "ir")
                (:file "monomorphize")
-               (:file "defunctionalize"))
+               (:file "defunctionalize")
+               (:file "lower")
+               (:file "interpret"))
   :in-order-to ((asdf:test-op (asdf:test-op #:sheaf/tests))))
 
 (asdf:defsystem #:sheaf/tests
@@ -20,5 +22,6 @@
   :components ((:file "package")
                (:file "ir")
                (:file "monomorphize")
-               (:file "defunctionalize"))
+               (:file "defunctionalize")
+               (:file "lower"))
   :perform (asdf:test-op (o c) (uiop:symbol-call '#:sheaf/tests '#:run)))

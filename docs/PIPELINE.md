@@ -1,7 +1,7 @@
 # Pipeline
 
 Sheaf uses Coalton as its frontend: Coalton parses and typechecks, and Sheaf
-takes over from the typed IR. The first three stages exist today.
+takes over from the typed IR. The first four stages exist today.
 
 | Stage | Does | Status |
 |---|---|---|
@@ -9,6 +9,7 @@ takes over from the typed IR. The first three stages exist today.
 | Capture | Records each binding's IR before Coalton optimizes it | `ir.lisp` |
 | Monomorphization | Specializes every binding at ground types; removes dictionaries ([MONOMORPHIZATION.md](MONOMORPHIZATION.md)) | `monomorphize.lisp` |
 | Defunctionalization | Turns function values into tagged unions ([CLOSURES.md](CLOSURES.md)) | `defunctionalize.lisp` |
+| Lowering | Turns the result into Sheaf's first-order IR ([IR.md](IR.md)) | `lower.lisp` |
 | Analyses | Roots, data stack assignment ([MEMORY.md](MEMORY.md)) | planned |
 | C emitter | One C file per program | planned |
 

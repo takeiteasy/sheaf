@@ -16,6 +16,7 @@ on stacks the compiler assigns, and memory is freed when its scope ends.
 | [MEMORY.md](docs/MEMORY.md) | Data stacks, roots, and where values are built |
 | [CLOSURES.md](docs/CLOSURES.md) | First-class functions without a heap |
 | [PIPELINE.md](docs/PIPELINE.md) | The compiler's stages, and IR capture |
+| [IR.md](docs/IR.md) | The first-order IR the analyses read |
 | [MONOMORPHIZATION.md](docs/MONOMORPHIZATION.md) | Specializing at ground types and removing dictionaries |
 | [COALTON.md](docs/COALTON.md) | The Coalton fork and how it is updated |
 | [STATUS.md](docs/STATUS.md) | What runs today |
