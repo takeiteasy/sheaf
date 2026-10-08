@@ -7,6 +7,7 @@
    (#:codegen #:coalton-impl/codegen)
    (#:entry #:coalton-impl/entry)
    (#:immutable-map #:coalton-impl/algorithm/immutable-map)
+   (#:pattern #:coalton-impl/codegen/pattern)
    (#:source #:coalton-impl/source)
    (#:tc #:coalton-impl/typechecker)
    (#:traverse #:coalton-impl/codegen/traverse)

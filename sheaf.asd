@@ -9,7 +9,8 @@
   :serial t
   :components ((:file "package")
                (:file "ir")
-               (:file "monomorphize"))
+               (:file "monomorphize")
+               (:file "defunctionalize"))
   :in-order-to ((asdf:test-op (asdf:test-op #:sheaf/tests))))
 
 (asdf:defsystem #:sheaf/tests
