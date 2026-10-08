@@ -122,6 +122,15 @@ reaches, and its root."
 ;;; The prelude's array and reference operations are primitives too. Each
 ;;; operation is its function's or its instance method's origin.
 
+(defparameter *prelude-types*
+  '((sheaf/prelude:fixedarray :storage :fixed)
+    (sheaf/prelude:array :storage :variable)
+    (sheaf/prelude:growarray :storage :grow)
+    (sheaf/prelude:stack :storage :grow-shrink)
+    (sheaf/prelude:slice :view)
+    (sheaf/prelude:ref :view))
+  "The prelude's types: the kind of each, and for arrays how it is sized.")
+
 (defparameter *prelude-ops*
   '((:fixed-new 1 :fixed) (:array-new 2 :variable) (:grow-new 0 :resizable) (:stack-new 0 :resizable)
     (:grow-push 2) (:stack-push 2) (:stack-pop 1)
@@ -150,15 +159,22 @@ method in the order the class declares them.")
 (defvar *prelude-primitives* (make-hash-table :test 'eq)
   "The prelude's operations by origin, for the program being lowered.")
 
+(defun prelude-instance-p (instance)
+  "Whether INSTANCE is of a type of the prelude, not one a program defines."
+  (let ((head (first (tc:flatten-type
+                      (first (tc:ty-predicate-types (tc:ty-class-instance-predicate instance)))))))
+    (and (tc:tycon-p head) (assoc (tc:tycon-name head) *prelude-types*) t)))
+
 (defun prelude-primitives ()
   (let ((table (make-hash-table :test 'eq)))
     (loop :for (function . op) :in *prelude-functions*
           :do (setf (gethash function table) op))
     (loop :for (class . ops) :in *prelude-classes*
           :do (dolist (instance (tc:lookup-class-instances entry:*global-environment* class :no-error t))
-                (loop :for symbol :in (tc:ty-class-instance-method-codegen-syms instance)
-                      :for op :in ops
-                      :do (setf (gethash symbol table) op))))
+                (when (or (eq class 'sheaf/prelude/fixed:extent) (prelude-instance-p instance))
+                  (loop :for symbol :in (tc:ty-class-instance-method-codegen-syms instance)
+                        :for op :in ops
+                        :do (setf (gethash symbol table) op)))))
     table))
 
 (defun primitive-of (name)
@@ -197,15 +213,6 @@ method in the order the class declares them.")
 (defparameter *opaque-types*
   '(coalton/cell:cell coalton/vector:vector coalton/hashtable:hashtable)
   "Types that are references to mutable storage, whose meaning is open (#8).")
-
-(defparameter *prelude-types*
-  '((sheaf/prelude:fixedarray :storage :fixed)
-    (sheaf/prelude:array :storage :variable)
-    (sheaf/prelude:growarray :storage :grow)
-    (sheaf/prelude:stack :storage :grow-shrink)
-    (sheaf/prelude:slice :view)
-    (sheaf/prelude:ref :view))
-  "The prelude's types: the kind of each, and for arrays how it is sized.")
 
 (defun prelude-class (type)
   "How the array TYPE is sized: `:fixed`, `:variable`, `:grow` or `:grow-shrink`."

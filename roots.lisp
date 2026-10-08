@@ -40,6 +40,10 @@ its second, and a reading one gives back the roots of its container.")
                   ((:scalar :reference) nil)
                   (:data (and (some #'holds-reference-p (field-types type)) t))))))))
 
+(defun tail-node (node)
+  "The expression a body of nested lets ends in."
+  (if (typep node 'ir-let) (tail-node (ir-let-body node)) node))
+
 (defun root-text (root def-name)
   (cond ((integerp root) (format nil "parameter ~d of ~a" root def-name))
         ((eq root :global) "a global")
@@ -59,6 +63,7 @@ is true a store that no caller could make safe is an error."
          (depths (make-hash-table :test 'eq))
          (contents (make-hash-table :test 'eq))
          (origins (make-hash-table :test 'eq))
+         (sites (make-hash-table :test 'eq))
          (locals (make-hash-table :test 'eq))
          (stores '())
          (*here* (ir-def-location def)))
@@ -94,7 +99,9 @@ is true a store that no caller could make safe is an error."
                           (fail (cons (reference-entry value-atom) trail)
                                 "Root checking rejects storing a reference rooted at ~a into storage rooted at ~a, which outlives it"
                                 (root-text value def-name) (root-text container def-name))))
-                   (add-contents container (list value)))))
+                   (add-contents container (list value))
+                   (unless (gethash value sites)
+                     (setf (gethash value sites) (cons (reference-entry value-atom) trail))))))
              (walk (node env depth owner)
                (let ((*here* (or (ir-node-location node) *here*)))
                  (etypecase node
@@ -131,7 +138,14 @@ is true a store that no caller could make safe is an error."
                      (:allocates
                       (let ((root (fresh-root owner)))
                         (when first-index
-                          (add-contents root (walk (nth first-index args) env depth owner)))
+                          (let* ((initial (nth first-index args))
+                                 (reached (walk initial env depth owner)))
+                            (add-contents root reached)
+                            (dolist (held reached)
+                              (unless (gethash held sites)
+                                (setf (gethash held sites)
+                                      (list (reference-entry initial)
+                                            (entry "the array it initialises")))))))
                         (list root)))
                      (:stores
                       (let ((value (nth first-index args)))
@@ -163,19 +177,22 @@ is true a store that no caller could make safe is an error."
                      (merge-roots reached (and fresh (list fresh)))))))
              (walk-match (node env depth owner)
                (let* ((scrutinee (walk (ir-match-scrutinee node) env depth owner))
-                      (result
-                        (apply #'merge-roots
-                               (loop :for branch :in (ir-match-branches node)
-                                     :collect (walk (ir-branch-body branch)
-                                                    (branch-env branch scrutinee env)
-                                                    depth owner)))))
-                 (unless (eq owner :fresh)
-                   (dolist (root result)
-                     (when (and (symbolp root) (not (member root (list :global :fresh owner)))
-                                (>= (gethash root depths) depth))
-                       (fail (list (root-entry root) (entry "the end of the branch it is made in"))
-                             "Root checking rejects a reference rooted at ~a that outlives the branch it is made in"
-                             (root-text root def-name)))))
+                      (match-entry (entry "the match that receives it"))
+                      (result '()))
+                 (dolist (branch (ir-match-branches node))
+                   (let ((roots (walk (ir-branch-body branch) (branch-env branch scrutinee env) depth owner)))
+                     (unless (eq owner :fresh)
+                       (dolist (root roots)
+                         (when (and (symbolp root) (not (member root (list :global :fresh owner)))
+                                    (>= (gethash root depths) depth))
+                           (fail (list (let ((tail (tail-node (ir-branch-body branch))))
+                                         (list def-name (format nil "the reference of type ~a leaving the branch"
+                                                                (type-text (ir-node-type tail)))
+                                               (or (ir-node-location tail) *here*)))
+                                       match-entry)
+                                 "Root checking rejects a reference rooted at ~a that outlives the branch it is made in"
+                                 (root-text root def-name)))))
+                     (setf result (merge-roots roots result))))
                  result))
              (branch-env (branch scrutinee env)
                (loop :for (name . type) :in (pattern-bindings (ir-branch-pattern branch))
@@ -209,6 +226,12 @@ is true a store that no caller could make safe is an error."
              (roots (let ((reached (walk (ir-def-body def) env 0 :fresh)))
                       (and (holds-reference-p (ir-def-result def)) reached)))
              (result '()))
+        ;; A local the result points into directly is built in the caller's
+        ;; destination, since stack assignment follows the flow of every local
+        ;; the result reaches. One it only holds in an array is not followed.
+        ;; TODO: reject only what stack assignment does not place in the
+        ;; destination; the rules here are stricter than Goose's need be.
+        ;; https://todo.sr.ht/~takeiteasy/sheaf/28
         (dolist (root roots)
           (cond ((integerp root) (pushnew root result))
                 ((eq root :global) (pushnew :global result))
@@ -218,8 +241,8 @@ is true a store that no caller could make safe is an error."
                            ((eq held :global) (pushnew :global result))
                            ((eq held :fresh))
                            ((eq held root))
-                           (t (fail (list (root-entry held)
-                                          (list def-name "the result" (ir-def-location def)))
+                           (t (fail (append (or (gethash held sites) (list (root-entry held)))
+                                            (list (list def-name "the result" (ir-def-location def))))
                                     "Root checking rejects returning storage that holds a reference rooted at ~a"
                                     (root-text held def-name))))))))
         (make-root-summary :result (nreverse result)

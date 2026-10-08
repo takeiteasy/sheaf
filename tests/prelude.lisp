@@ -67,8 +67,20 @@
 (test an-undeclared-length-is-an-error
   (signals sheaf:specialization-error (lowered "bad-length")))
 
+(defun error-text (thunk)
+  (handler-case (progn (funcall thunk) "")
+    (error (condition) (princ-to-string condition))))
+
 (test an-index-past-the-end-is-an-error
-  (signals error (sheaf:run-lowered (lowered "out-of-bounds"))))
+  (is (search "outside the array"
+              (error-text (lambda () (sheaf:run-lowered (lowered "out-of-bounds")))))))
+
+(test a-programs-own-instance-of-a-prelude-class-is-an-ordinary-function
+  (is (= 6 (sheaf:run-lowered (lowered "own-indexed"))))
+  (is (null (prims-with-prelude-ops (lowered "own-indexed")))))
+
+(defun prims-with-prelude-ops (lowered)
+  (remove-if-not (lambda (node) (sheaf::prelude-op-p (sheaf:ir-prim-op node))) (prims lowered)))
 
 (defun with-shared-stack (fixture name)
   "A fresh assignment of FIXTURE in which every array of the function NAME is
@@ -89,7 +101,8 @@ pushed to that function's pool."
 
 (test a-growable-under-another-value-is-caught
   (is (integerp (sheaf:ir-def-pool (first (clones "arrays" "TWO-ARRAYS")))))
-  (signals error (sheaf:run-lowered (with-shared-stack "arrays" "TWO-ARRAYS"))))
+  (is (search "grew under"
+              (error-text (lambda () (sheaf:run-lowered (with-shared-stack "arrays" "TWO-ARRAYS")))))))
 
 (test arrays-are-not-emitted
   (let ((message (handler-case (progn (sheaf:emit-c (assigned "arrays")) "")
