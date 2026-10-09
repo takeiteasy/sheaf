@@ -118,9 +118,9 @@ freed.
 
 ## Limitations
 
-- A bank is only simulated: C needs stacks handed out at run time, and a
-  47-bit address space holds about 30,000 of its 4 GiB stacks:
-  [#33](https://todo.sr.ht/~takeiteasy/sheaf/33).
+- In C a bank holds about 32,000 growable values at a time
+  ([EMITTER.md](EMITTER.md#banks)), and its freed slices stay committed:
+  [#36](https://todo.sr.ht/~takeiteasy/sheaf/36).
 - A cycle keeps what it allocates until the call into it returns:
   [#11](https://todo.sr.ht/~takeiteasy/sheaf/11).
 - A growable local live across a call back into its own cycle is an error.
@@ -142,7 +142,7 @@ freed.
     stack for each growable value built from it and frees them all when the
     bank's owner ends. `compute-placements` marks a cycle banked when its
     growable count would grow with the recursion, and a def that reaches a
-    banked call is banked too. See [Limitations](#limitations) for C.
+    banked call is banked too. C hands out slices of one reservation ([EMITTER.md](EMITTER.md#banks)).
 [^region]: A cycle of functions whose results hold no storage and that build
     no cells or arrays takes no region. Growable values go on stacks of their
     own, so a cycle that builds only those takes none either.

@@ -12,7 +12,7 @@
 (defvar *emit-def* nil "The def being emitted, for errors.")
 (defvar *self*)
 (defvar *params*)
-(defvar *releases* '() "The stack tops to restore on return, each a stack index and the C variable holding its mark.")
+(defvar *releases* '() "What to give back on return, each `:stack` or `:bank`, its index and the C variable holding its mark.")
 (defvar *result-c-type*)
 (defvar *tail-used*)
 
@@ -201,10 +201,15 @@ and return its C variable."
                        index index array index array index fill)
                  array))
              (new-growable ()
-               (let ((growable (fresh-c-name (make-symbol "GROW"))))
-                 (line "~a ~a = sheaf_push(&sheaf_stacks[~d], offsetof(struct ~a, e), _Alignof(struct ~a));"
-                       (c-type type) growable (stack) (array-struct :grow type) (array-struct :grow type))
-                 (line "~a->stack = &sheaf_stacks[~d];" growable (stack))
+               (let ((growable (fresh-c-name (make-symbol "GROW")))
+                     (on (if (ir-prim-bank node)
+                             (let ((slice (fresh-c-name (make-symbol "SLICE"))))
+                               (line "sheaf_stack *~a = sheaf_bank_stack(&sheaf_banks[~d]);" slice (ir-prim-bank node))
+                               slice)
+                             (format nil "&sheaf_stacks[~d]" (stack)))))
+                 (line "~a ~a = sheaf_push(~a, offsetof(struct ~a, e), _Alignof(struct ~a));"
+                       (c-type type) growable on (array-struct :grow type) (array-struct :grow type))
+                 (line "~a->stack = ~a;" growable on)
                  (line "~a->length = 0;" growable)
                  growable))
              (push-element (growable value storage-type)
@@ -354,8 +359,10 @@ and return its C variable."
 ;;; Statements
 
 (defun emit-releases (releases)
-  (loop :for (stack . mark) :in releases
-        :do (line "sheaf_stacks[~d].top = ~a;" stack mark)))
+  (loop :for (kind index mark) :in releases
+        :do (ecase kind
+              (:stack (line "sheaf_stacks[~d].top = ~a;" index mark))
+              (:bank (line "sheaf_bank_release(&sheaf_banks[~d], ~a);" index mark)))))
 
 (defun emit-return (expression)
   (if *releases*
@@ -439,13 +446,15 @@ symbol, a type and the expression for its value."
   "Write the statements that compute NODE into TARGET, a C variable or `:return`."
   (etypecase node
     (ir-let
-     (when (ir-let-bank node)
-       (emit-error "a bank: https://todo.sr.ht/~~takeiteasy/sheaf/33"))
-     (let ((name (fresh-c-name (ir-let-name node)))
-           (owned (loop :for stack :in (ir-let-stacks node)
-                        :collect (cons stack (fresh-c-name (make-symbol "MARK"))))))
-       (loop :for (stack . mark) :in owned
-             :do (line "char *~a = sheaf_stacks[~d].top;" mark stack))
+     (let* ((name (fresh-c-name (ir-let-name node)))
+            (bank (ir-let-bank node))
+            (owned (append (loop :for stack :in (ir-let-stacks node)
+                                 :collect (list :stack stack (fresh-c-name (make-symbol "MARK"))))
+                           (and bank (list (list :bank bank (fresh-c-name (make-symbol "MARK"))))))))
+       (loop :for (kind index mark) :in owned
+             :do (ecase kind
+                   (:stack (line "char *~a = sheaf_stacks[~d].top;" mark index))
+                   (:bank (line "sheaf_slice *~a = sheaf_banks[~d].head;" mark index))))
        (line "~a ~a SHEAF_UNUSED;" (c-type (ir-node-type (ir-let-value node))) name)
        (emit-node (ir-let-value node) name env)
        (let ((*releases* (append owned *releases*)))
@@ -472,7 +481,7 @@ symbol, a type and the expression for its value."
          (*self* (ir-def-name def))
          (*tail-used* nil)
          (*result-c-type* (c-type (ir-def-result def)))
-         (*releases* (and (ir-def-pool def) (list (cons (ir-def-pool def) "pool_mark"))))
+         (*releases* (and (ir-def-pool def) (list (list :stack (ir-def-pool def) "pool_mark"))))
          (name (c-name (ir-def-name def)))
          (params (loop :for (symbol . type) :in (ir-def-params def)
                        :collect (cons (fresh-c-name symbol) (c-type type))))
@@ -543,11 +552,10 @@ runtime/sheaf.h. Writes it to STREAM, or returns it as a string without one."
                  (lowered-types assigned))
         (let* ((body (with-output-to-string (*out*)
                        (line "static sheaf_stack sheaf_stacks[~d];" (max 1 (lowered-stack-count assigned)))
+                       (line "static sheaf_bank sheaf_banks[~d] SHEAF_UNUSED;" (max 1 (lowered-stack-count assigned)))
                        (terpri *out*)
                        (maphash (lambda (name def)
                                   (let ((*emit-def* def))
-                                    (when (ir-def-bank def)
-                                      (emit-error "a bank: https://todo.sr.ht/~~takeiteasy/sheaf/33"))
                                     (line "~a;" (signature def (c-name name)
                                                            (loop :for (nil . type) :in (ir-def-params def)
                                                                  :collect (c-type type))))))

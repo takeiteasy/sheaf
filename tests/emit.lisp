@@ -61,7 +61,8 @@ and exit code."
 
 (test growables-match-the-interpreter-in-c
   (dolist (root '("MAIN-TWO" "MAIN-LIST" "MAIN-RELAY" "MAIN-EITHER" "MAIN-LISTED" "MAIN-DOWN"
-                  "MAIN-PICKED" "MAIN-CELL" "MAIN-TABLE"))
+                  "MAIN-PICKED" "MAIN-CELL" "MAIN-TABLE" "MAIN-VECTORS" "MAIN-TWOS" "MAIN-DEEP"
+                  "MAIN-REUSE"))
     (multiple-value-bind (compiled interpreted) (c-result-from "growables" root)
       (is (= interpreted compiled) "~a" root))))
 
@@ -77,10 +78,27 @@ and exit code."
     (is (/= 0 code))
     (is (search "grew under" errors))))
 
-(test hash-tables-and-banks-are-not-emitted
-  (is (search "sheaf/32" (error-text (lambda () (sheaf:emit-c (assigned "hashtables"))))))
-  (is (search "sheaf/33" (error-text (lambda ()
-                                       (sheaf:emit-c (sheaf:assign-stacks (lowered-from "growables" "MAIN-VECTORS"))))))))
+(test hash-tables-are-not-emitted
+  (is (search "sheaf/32" (error-text (lambda () (sheaf:emit-c (assigned "hashtables")))))))
+
+(defparameter *small-banks* '("-DSHEAF_SLICE_SIZE=65536" "-DSHEAF_BANK_SPACE=524288")
+  "Eight slices of bank space.")
+
+(defun banked-c (root &rest options)
+  (apply #'run-c (sheaf:assign-stacks (lowered-from "growables" root)) options))
+
+(test a-bank-hands-out-slices-and-takes-them-back
+  (multiple-value-bind (output errors code) (apply #'banked-c "MAIN-REUSE" *small-banks*)
+    (declare (ignore errors))
+    (is (zerop code))
+    (is (= (sheaf:run-lowered (sheaf:assign-stacks (lowered-from "growables" "MAIN-REUSE")))
+           (parse-integer output)))))
+
+(test a-cycle-deeper-than-the-bank-space-aborts-in-c
+  (multiple-value-bind (output errors code) (apply #'banked-c "MAIN-DEEP" *small-banks*)
+    (declare (ignore output))
+    (is (/= 0 code))
+    (is (search "bank space exhausted" errors))))
 
 (test clones-are-named-in-comments
   (is (search "// PAIR<" (sheaf:emit-c (assigned "stacks")))))

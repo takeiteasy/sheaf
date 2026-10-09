@@ -74,6 +74,21 @@
   (define (main-vectors)
     (vector-count (vectors-down 3)))
 
+  (declare main-deep (Void -> UFix))
+  (define (main-deep)
+    (vector-count (vectors-down 40)))
+
+  (declare dropped-vectors (UFix -> UFix))
+  (define (dropped-vectors n)
+    (vector-count (vectors-down n)))
+
+  (declare main-reuse (Void -> UFix))
+  (define (main-reuse)
+    (+ (dropped-vectors 3)
+       (+ (dropped-vectors 4)
+          (+ (dropped-vectors 5)
+             (dropped-vectors 6)))))
+
   (declare twos-down (UFix -> (List (Tuple (vector:Vector UFix) (vector:Vector UFix)))))
   (define (twos-down n)
     (if (== n 0)

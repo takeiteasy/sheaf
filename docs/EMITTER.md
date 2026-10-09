@@ -68,10 +68,26 @@ The excerpt omits `SHEAF_UNUSED` attributes and temporaries.
 | A cell on stack `n` | `sheaf_push(&sheaf_stacks[n], …)` |
 | A pool or region | The stack's `top` saved on entry and restored on exit |
 | A growable local's stacks | The stacks' `top` saved before its `let` and restored after the body |
+| A banked growable value | Pushed to a slice taken from the bank; a `let` that owns the bank gives its slices back after the body |
 | A growable value | Pushed to its own stack and grown in place; an index or range outside it, or a push when another value is above it, prints a message and exits |
 
 `SHEAF_STACK_SIZE` sets each stack's size (4 GiB by default, reserved, not
 committed). A push past the end prints `data stack n exhausted` and exits.
+
+## Banks
+
+A bank ([STACKS.md](STACKS.md#banks)) is a `sheaf_bank`: a list of the slices it
+has handed out. Each growable value built from it takes a slice of one
+reservation on its first use, and the bank's owner gives them all back to a free
+list when it ends.
+
+| Setting | Default | Sets |
+|---|---|---|
+| `SHEAF_BANK_SPACE` | 32 TiB | The reservation, reserved with `MAP_NORESERVE` |
+| `SHEAF_SLICE_SIZE` | 1 GiB | Each growable value's ceiling |
+
+Depth is the space divided by the slice, about 32,000 banked values by default.
+A slice past either limit prints `bank space exhausted` or `a bank slice exhausted` and exits.
 
 ## Calls
 
@@ -91,8 +107,8 @@ committed). A push past the end prints `data stack n exhausted` and exits.
 - Raw Lisp is an error: [#16](https://todo.sr.ht/~takeiteasy/sheaf/16),
   [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
 - `HashTable`: [#32](https://todo.sr.ht/~takeiteasy/sheaf/32).
-- A result that takes a bank, from a recursive cycle that builds a growable value at every level:
-  [#33](https://todo.sr.ht/~takeiteasy/sheaf/33).
+- A bank's freed slices stay committed:
+  [#36](https://todo.sr.ht/~takeiteasy/sheaf/36).
 - Only `UFix` and the data types built from it are emitted:
   [#23](https://todo.sr.ht/~takeiteasy/sheaf/23).
 - `UFix` arithmetic wraps at 64 bits: [#9](https://todo.sr.ht/~takeiteasy/sheaf/9).
