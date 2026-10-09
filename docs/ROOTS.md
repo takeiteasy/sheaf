@@ -119,6 +119,9 @@ the caller's destinations ([STACKS.md](STACKS.md)).
 
 ## Limitations
 
+- A call result has one root, so a reference into its cell part is rejected
+  when its growable part is freed:
+  [#40](https://todo.sr.ht/~takeiteasy/sheaf/40).
 - The SBCL path does not run the check:
   [#17](https://todo.sr.ht/~takeiteasy/sheaf/17).
 
@@ -129,7 +132,6 @@ the caller's destinations ([STACKS.md](STACKS.md)).
 
 [^freed]: A growable local is freed when its `let` ends, so a branch frees the
     ones it binds unless the result holds them, or the branch returns them
-    to a `let` outside it. Roots are one per `let`, so a call result that holds
-    both a cell and a growable value has one root: a reference into its cell
-    part leaving a branch is rejected when the growable part is freed, and a
-    store of one is rejected the same way.
+    to a `let` outside it. A call result that holds
+    both a cell and a growable value has one root, which the limitation above
+    describes.
