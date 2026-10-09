@@ -122,7 +122,8 @@ freed.
   ([EMITTER.md](EMITTER.md#banks)).
 - A cycle keeps what it allocates until the call into it returns:
   [#11](https://todo.sr.ht/~takeiteasy/sheaf/11).
-- A growable local live across a call back into its own cycle is an error.
+- A growable local live across a call back into its own cycle is an error:
+  [#41](https://todo.sr.ht/~takeiteasy/sheaf/41).
 
 [^recipe]: Goose's specification covers stack assignment in §10.3 and result
     placement in §7.3.

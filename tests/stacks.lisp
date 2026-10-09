@@ -364,3 +364,6 @@ body BODY-FN builds from a function that makes a call of `make`."
   (is (eq :resizable (sheaf:size-class *growable*)))
   (is (eq :variable (sheaf:size-class (sheaf::make-ir-type :array :storage 'sheaf/prelude:array (list *number*)))))
   (is (eq :fixed (sheaf:size-class *number*))))
+
+(test a-growable-local-kept-across-a-recursive-call-is-rejected
+  (is (search "sheaf/41" (error-text (lambda () (assigned "growable-recursion"))))))
