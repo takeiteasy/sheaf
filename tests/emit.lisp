@@ -37,6 +37,9 @@ and exit code."
   (is (= 21 (c-result "recursive-data")))
   (is (= 47 (c-result "stacks"))))
 
+(test accepted-references-match-the-interpreter-in-c
+  (is (= 163 (c-result "roots"))))
+
 (test a-self-tail-call-is-a-loop
   (is (= 10500500 (c-result "tail"))))
 
