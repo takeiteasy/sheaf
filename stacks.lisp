@@ -16,19 +16,15 @@
 
 ;;; Storage
 
-(defparameter *resizable-types* '(coalton/hashtable:hashtable)
-  "Types whose values grow after construction.")
-
-;; TODO: these size classes stand in for the type syntax and the meaning of
-;; Hashtable. A recursive data type is a fixed handle whose cells live
-;; in a pool, and nothing is variable-size.
+;; TODO: these size classes stand in for the type syntax. A recursive data type
+;; is a fixed handle whose cells live in a pool, and nothing is variable-size.
 ;; https://todo.sr.ht/~takeiteasy/sheaf/24
 (defun size-class (type)
   "TYPE's size class: `:fixed`, `:variable` or `:resizable`."
   (case (prelude-class type)
     ((:grow :grow-shrink) :resizable)
     (:variable :variable)
-    (t (if (member (ir-type-name type) *resizable-types*) :resizable :fixed))))
+    (t :fixed)))
 
 (defun field-types (type)
   (loop :for constructor :in (lowered-constructors *lowered* type)
@@ -58,7 +54,6 @@
                   (and (some #'holds-storage-p
                              (ecase (ir-type-kind type)
                                (:data (field-types type))
-                               (:reference (ir-type-args type))
                                ((:scalar :storage :view) '())))
                        t))))))
 

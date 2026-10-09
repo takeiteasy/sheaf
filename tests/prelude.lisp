@@ -36,17 +36,22 @@
     (is (= expected (sheaf:run-lowered (assigned "arrays"))))))
 
 (defun prelude-ops-used (&rest fixtures)
+  "The prelude operations the fixtures' mains, and the hashtables' COUNTED, use."
   (sort (remove-duplicates
          (loop :for fixture :in fixtures
-               :append (mapcar #'sheaf:ir-prim-op (prims-with-prelude-ops (lowered fixture)))))
+               :append (mapcar #'sheaf:ir-prim-op (prims-with-prelude-ops (lowered fixture)))
+               :when (string= fixture "hashtables")
+                 :append (mapcar #'sheaf:ir-prim-op
+                                 (prims-with-prelude-ops (lowered-from fixture "COUNTED")))))
         #'string<))
 
 (test arrays-lower-to-primitives
   (is (zerop (count-ir (lowered "arrays") 'sheaf:ir-foreign)))
   (is (zerop (count-ir (lowered "cells") 'sheaf:ir-foreign)))
   (is (zerop (count-ir (lowered "vectors") 'sheaf:ir-foreign)))
+  (is (zerop (count-ir (lowered "hashtables") 'sheaf:ir-foreign)))
   (is (equal (sort (mapcar #'first sheaf::*prelude-ops*) #'string<)
-             (prelude-ops-used "arrays" "cells" "vectors"))))
+             (prelude-ops-used "arrays" "cells" "vectors" "hashtables"))))
 
 (test cells-give-one-result-on-every-tier
   (let ((expected (run-on-sbcl "cells")))
@@ -81,6 +86,51 @@
                               (sheaf:ir-prim-stack (sheaf:ir-let-value node))))))
                    (sheaf:ir-def-body total))
     (is (= 1 seen))))
+
+(defun lowered-from (fixture root)
+  "FIXTURE's function ROOT, lowered."
+  (sheaf:lower (sheaf:defunctionalize
+                (sheaf:monomorphize (fixture-program fixture) (fixture-symbol fixture root)))))
+
+(test hashtables-give-one-result-on-every-tier
+  (let ((expected (run-on-sbcl "hashtables")))
+    (is (= 90 expected))
+    (is (= expected (sheaf:run-lowered (lowered "hashtables"))))
+    (is (= expected (sheaf:run-lowered (assigned "hashtables"))))))
+
+(test a-hashtable-count-gives-one-result-on-every-tier
+  (let ((lowered (lowered-from "hashtables" "COUNTED")))
+    (is (= 2 (funcall (symbol-function (fixture-symbol "hashtables" "COUNTED")))))
+    (is (= 2 (sheaf:run-lowered lowered)))
+    (is (= 2 (sheaf:run-lowered (sheaf:assign-stacks lowered))))))
+
+(test hashtables-are-well-formed
+  (is-true (sheaf:check-lowered (lowered "hashtables"))))
+
+(test a-returned-hashtable-is-built-in-the-destination
+  (let ((clone (first (clones "hashtables" "FILLED"))))
+    (is (integerp (sheaf:ir-def-destination clone)))
+    (dolist (node (allocating-prims-of clone))
+      (is (eql (sheaf:ir-def-destination clone) (sheaf:ir-prim-stack node))))))
+
+(test a-hashtable-local-owns-its-stack
+  (let ((total (first (clones "hashtables" "LOCAL-TOTAL"))) (seen 0))
+    (sheaf:walk-ir (lambda (node)
+                     (when (and (typep node 'sheaf:ir-let)
+                                (typep (sheaf:ir-let-value node) 'sheaf:ir-prim)
+                                (eq :hashtable-new (sheaf:ir-prim-op (sheaf:ir-let-value node))))
+                       (incf seen)
+                       (is (integerp (sheaf:ir-let-stack node)))
+                       (is (= (sheaf:ir-let-stack node)
+                              (sheaf:ir-prim-stack (sheaf:ir-let-value node))))))
+                   (sheaf:ir-def-body total))
+    (is (= 1 seen))))
+
+(test a-hashtable-keyed-by-another-type-is-rejected
+  (let ((condition (handler-case (lowered-from "hashtables" "BOOLEAN-KEYS")
+                     (sheaf:specialization-error (condition) condition))))
+    (is (typep condition 'sheaf:specialization-error))
+    (is (search "/sheaf/23" (sheaf:specialization-error-message condition)))))
 
 (test a-returned-cell-is-built-in-the-destination
   (let ((clone (first (clones "cells" "FRESH-CELL"))))

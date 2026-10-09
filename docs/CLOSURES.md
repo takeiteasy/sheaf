@@ -55,7 +55,9 @@ root rules in [MEMORY.md](MEMORY.md).
 ## Result
 
 `defunctionalize` returns a `specialized`, like `monomorphize`, holding only
-the specializations the root reaches.
+the specializations the root reaches. A prelude primitive ([PRELUDE.md](PRELUDE.md))
+that the program calls is kept as it was, with what it refers to, so the program
+still runs on Coalton's backend; lowering replaces its calls.
 
 | Function | Returns |
 |---|---|

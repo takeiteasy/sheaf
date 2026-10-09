@@ -59,6 +59,12 @@
   (is (= (run-specialized (specialized "recursive-data"))
          (run-specialized (defunctionalized "recursive-data")))))
 
+(test primitive-bodies-are-kept-as-they-were
+  (let ((result (defunctionalized "hashtables")))
+    (is-true (sheaf:check-defunctionalized result))
+    (is (plusp (hash-table-count (sheaf::specialized-passthrough result))))
+    (is (= 90 (run-specialized result)))))
+
 (test lambdas-reaching-one-slot-become-cases
   (let* ((result (defunctionalized "closures"))
          (union (root-result-type result (fixture-symbol "closures" "PICK")))

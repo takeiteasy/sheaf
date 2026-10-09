@@ -24,6 +24,7 @@
   :components ((:file "package")
                (:file "ir")
                (:file "monomorphize")
+               (:file "prelude-ops")
                (:file "defunctionalize")
                (:file "lower")
                (:file "stacks")

@@ -53,7 +53,7 @@ upper case."
                                 (sheaf:root-summary-stores (summary summaries "PUT")))))))
 
 (test the-existing-fixtures-pass-root-checking
-  (dolist (fixture '("counter" "closures" "flows" "recursive-data" "stacks" "tail" "arrays" "cells" "placement" "vectors"))
+  (dolist (fixture '("counter" "closures" "flows" "recursive-data" "stacks" "tail" "arrays" "cells" "placement" "vectors" "hashtables"))
     (is (hash-table-p (sheaf:check-roots (lowered fixture))) "~a" fixture)))
 
 (test a-store-names-the-reference-and-the-store
@@ -68,6 +68,8 @@ upper case."
                (chain "CELL-WRITE-INNER")))
     (is (equal '("(arr:ref inner 0)" "(vector:push! (arr:ref inner 0) outer)")
                (chain "VECTOR-PUSH-INNER")))
+    (is (equal '("(arr:ref inner 0)" "(hashtable:set! outer 1 (arr:ref inner 0))")
+               (chain "HASHTABLE-SET-INNER")))
     (is (equal '("(cons 1 nil)" "(arr:set! outer 0 inner)")
                (chain "STORE-LIST-INNER")))
     (is (equal '("(arr:ref inner 0)" "(arr:set! outer 0 (arr:ref inner 0))")

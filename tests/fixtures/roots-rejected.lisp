@@ -7,6 +7,7 @@
    (#:arr #:sheaf/prelude/arr)
    (#:cell #:coalton/cell)
    (#:grow #:sheaf/prelude/grow)
+   (#:hashtable #:coalton/hashtable)
    (#:ref #:sheaf/prelude/ref)
    (#:vector #:coalton/vector)))
 
@@ -75,6 +76,13 @@
     (let ((outer (the (Vector (Ref UFix)) (vector:new))))
       (let ((inner (arr:new 1 0)))
         (vector:push! (arr:ref inner 0) outer)
+        0)))
+
+  (declare hashtable-set-inner (Void -> UFix))
+  (define (hashtable-set-inner)
+    (let ((outer (the (hashtable:HashTable UFix (Ref UFix)) (hashtable:new))))
+      (let ((inner (arr:new 1 0)))
+        (hashtable:set! outer 1 (arr:ref inner 0))
         0)))
 
   (declare push-inner (Void -> UFix))

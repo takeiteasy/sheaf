@@ -180,6 +180,24 @@ the run touched when the program has a stack assignment."
                      (:vector-length
                       (live (first args) "A vector read")
                       (length (datum-fields (first args))))
+                     ((:hashtable-new :hashtable-with-capacity)
+                      (allocate :grow-shrink (make-hash-table :test 'eql) node))
+                     (:hashtable-set
+                      (setf (gethash (second args) (growable (first args))) (third args))
+                      (unit))
+                     (:hashtable-get
+                      (live (first args) "A hashtable read")
+                      (multiple-value-bind (value found) (gethash (second args) (datum-fields (first args)))
+                        (if found
+                            (make-datum (constructor-named lowered type "SOME") (list value))
+                            (make-datum (constructor-named lowered type "NONE") '()))))
+                     (:hashtable-remove
+                      (live (first args) "A hashtable written")
+                      (remhash (second args) (datum-fields (first args)))
+                      (unit))
+                     (:hashtable-count
+                      (live (first args) "A hashtable read")
+                      (hash-table-count (datum-fields (first args))))
                      (:elements-length
                       (multiple-value-bind (vector start end) (view (first args))
                         (declare (ignore vector))

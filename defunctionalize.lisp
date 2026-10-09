@@ -258,6 +258,9 @@ shapes, and PATH holds the data shapes being built."
 
 ;;; Analysis
 
+(defvar *primitive-names* (make-hash-table :test 'eq)
+  "The names of the specialized program that are prelude primitives.")
+
 (defstruct (binfo (:constructor make-binfo (name node kind params ret)))
   "What the analysis knows of one specialized binding. A function has PARAMS
 and RET shapes; a value has just RET."
@@ -484,11 +487,22 @@ its sets are then free to differ per use."
                    (ast:node-direct-application-rator node)))
     shape))
 
+(defun primitive-rator-p (rator env)
+  (and (typep rator 'ast:node-variable)
+       (not (assoc (ast:node-variable-value rator) env))
+       (gethash (ast:node-variable-value rator) *primitive-names*)))
+
 (defun infer-application (node env)
   (let ((rator (ast:node-application-rator node))
         (rands (ast:node-application-rands node)))
     (when (ast:node-application-keyword-rands node)
       (unsupported "keyword arguments"))
+    (when (primitive-rator-p rator env)
+      (let ((args (mapcar (lambda (rand) (infer rand env)) rands))
+            (shape (shape-of (ast:node-type node))))
+        (when (or (shape-has-fn-p shape) (some #'shape-has-fn-p args))
+          (unsupported "the primitive ~s receiving or returning a function" (ast:node-variable-value rator)))
+        (return-from infer-application shape)))
     (let ((global (and (typep rator 'ast:node-variable)
                        (global-name-p (ast:node-variable-value rator) env)
                        (eq (binfo-kind (gethash (ast:node-variable-value rator) *binfos*)) :function)
@@ -683,7 +697,20 @@ a capture."
         (make-binfo name node :value '() (shape-of (ast:node-type node))))))
 
 (defstruct (analysis (:constructor %make-analysis))
-  specialized shapes sites binfos lams global-lams group-lams)
+  specialized shapes sites binfos lams global-lams group-lams primitives)
+
+(defun primitive-names (specialized)
+  "The names in SPECIALIZED that are prelude primitives, whose bodies are left as
+they are: lowering replaces every call of one."
+  (let ((entry:*global-environment* (specialized-environment specialized))
+        (primitives (prelude-primitives))
+        (names (make-hash-table :test 'eq)))
+    (maphash (lambda (name node)
+               (declare (ignore node))
+               (when (gethash (or (specialized-origin specialized name) name) primitives)
+                 (setf (gethash name names) t)))
+             (specialized-bindings specialized))
+    names))
 
 (defun analyze (specialized)
   "Find the lambdas that reach every function-typed slot of SPECIALIZED."
@@ -697,19 +724,22 @@ a capture."
          (*group-lams* (make-hash-table :test 'eq))
          (*owner* nil)
          (*at* nil)
-         (bindings (specialized-bindings specialized)))
+         (bindings (specialized-bindings specialized))
+         (primitives (primitive-names specialized))
+         (*primitive-names* primitives))
     (dolist (scc (binding-sccs bindings))
-      (dolist (name scc)
-        (setf (gethash name *binfos*) (make-binfo-for name (gethash name bindings))))
-      (dolist (name scc)
-        (infer-binding (gethash name *binfos*)))
-      (dolist (name scc)
-        (check-no-nested-closures (gethash name *binfos*)))
-      (dolist (name scc)
-        (setf (binfo-state (gethash name *binfos*)) :done)))
+      (let ((scc (remove-if (lambda (name) (gethash name primitives)) scc)))
+        (dolist (name scc)
+          (setf (gethash name *binfos*) (make-binfo-for name (gethash name bindings))))
+        (dolist (name scc)
+          (infer-binding (gethash name *binfos*)))
+        (dolist (name scc)
+          (check-no-nested-closures (gethash name *binfos*)))
+        (dolist (name scc)
+          (setf (binfo-state (gethash name *binfos*)) :done))))
     (%make-analysis :specialized specialized :shapes *shapes* :sites *sites*
                     :binfos *binfos* :lams (reverse *lams*) :global-lams *global-lams*
-                    :group-lams *group-lams*)))
+                    :group-lams *group-lams* :primitives primitives)))
 
 ;;; Concrete types
 ;;;
@@ -1209,6 +1239,10 @@ FN is evaluated before ARGS, as in the call it replaces."
               :rator (ast:make-node-global-variable :type type :value symbol
                                                     :location (ast:node-location rator))
               :rands rands :keyword-rands '())))
+          ((primitive-rator-p rator '())
+           (ast:make-node-application
+            :type (ctype-ty ctype) :location location :properties '()
+            :rator rator :rands rands :keyword-rands '()))
           ((and name (not (gethash name *binfos*)) (constructor-p name)
                 (not (gethash rator *shapes*)))
            (let ((ty (ctype-ty ctype)))
@@ -1338,6 +1372,7 @@ lambdas that reach it, and every call through one by a match."
          (*lam-context* nil)
          (*owner* nil)
          (*at* nil)
+         (*primitive-names* (analysis-primitives analysis))
          (root (gethash (specialized-root specialized) *binfos*))
          (*fallback-location* (ast:node-location (binfo-node root)))
          (result (%make-specialized)))
@@ -1351,9 +1386,59 @@ lambdas that reach it, and every call through one by a match."
                 (setf (gethash (inst-symbol request) (specialized-bindings result)) node
                       (gethash (inst-symbol request) (specialized-origins result))
                       (list (or (specialized-origin specialized origin) origin) (ast:node-type node)))))
+    (keep-primitives specialized result)
     (setf (specialized-environment result) *env*
           (specialized-type-definitions result) (reverse *type-definitions*))
     result))
+
+(defun rename-globals (node names)
+  "NODE with each reference to a global in the table NAMES renamed to its value."
+  (flet ((renamed (name) (gethash name names)))
+    (traverse:traverse
+     node
+     (list
+      (traverse:action (:after ast:node-global-variable n)
+        (let ((new (renamed (ast:node-variable-value n))))
+          (when new
+            (ast:make-node-global-variable :type (ast:node-type n) :value new
+                                           :location (ast:node-location n)))))
+      (traverse:action (:after ast:node-direct-application n)
+        (let ((new (renamed (ast:node-direct-application-rator n))))
+          (when new
+            (ast:make-node-direct-application
+             :type (ast:node-type n)
+             :location (ast:node-location n)
+             :properties (ast:node-direct-application-properties n)
+             :rator-type (ast:node-direct-application-rator-type n)
+             :rator new
+             :rands (ast:node-direct-application-rands n)
+             :keyword-rands (ast:node-direct-application-keyword-rands n)))))))))
+
+(defun keep-primitives (specialized result)
+  "Copy into RESULT the primitives of SPECIALIZED that RESULT calls, and what they
+refer to, so the program still runs on Coalton's backend. Lowering replaces every
+call of a primitive, so these bindings are marked passthrough: they are neither
+checked nor lowered. Each takes a new symbol, as Coalton's backend binds a symbol
+once."
+  (let ((bindings (specialized-bindings specialized))
+        (result-bindings (specialized-bindings result))
+        (names (make-hash-table :test 'eq))
+        (pending (loop :for node :being :the :hash-values :of (specialized-bindings result)
+                       :append (referenced-names node))))
+    (loop :while pending
+          :do (let ((name (pop pending)))
+                (multiple-value-bind (node found) (gethash name bindings)
+                  (when (and found (not (gethash name names)) (not (nth-value 1 (gethash name result-bindings))))
+                    (setf (gethash name names) (make-symbol (symbol-name name)))
+                    (setf pending (append (referenced-names node) pending))))))
+    (loop :for (name . node) :in (loop :for name :being :the :hash-keys :of result-bindings
+                                         :using (:hash-value node) :collect (cons name node))
+          :do (setf (gethash name result-bindings) (rename-globals node names)))
+    (maphash (lambda (name new)
+               (setf (gethash new result-bindings) (rename-globals (gethash name bindings) names)
+                     (gethash new (specialized-passthrough result)) t
+                     (gethash new (specialized-origins result)) (gethash name (specialized-origins specialized))))
+             names)))
 
 (defun type-contains-function-p (type)
   (etypecase type
@@ -1387,9 +1472,10 @@ a global named in a call."
                     (ast:node-abstraction
                      (fail "a lambda is left"))
                     (t (mapc #'check (node-children node))))))
-         (if (typep root 'ast:node-abstraction)
-             (check (ast:node-abstraction-subexpr root))
-             (check root))))
+         (unless (gethash name (specialized-passthrough specialized))
+           (if (typep root 'ast:node-abstraction)
+               (check (ast:node-abstraction-subexpr root))
+               (check root)))))
      (specialized-bindings specialized))
     t))
 

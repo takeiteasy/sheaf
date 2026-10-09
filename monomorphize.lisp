@@ -26,6 +26,7 @@ as lists of a name, a type or a description of it, and a source location."))
   "A program specialized at ground types, with no type-class dictionaries."
   (bindings (make-hash-table :test 'eq) :type hash-table :read-only t)
   (origins (make-hash-table :test 'eq) :type hash-table :read-only t)
+  (passthrough (make-hash-table :test 'eq) :type hash-table :read-only t)
   (root nil :type symbol)
   (environment entry:*global-environment* :type tc:environment)
   (type-definitions '() :type list))

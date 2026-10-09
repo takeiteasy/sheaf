@@ -37,8 +37,7 @@ A store inside a callee also names the call.
 | A value read out of an array | The roots of the array[^inexact] |
 
 Only values that are, or hold, storage have roots: an array, slice, reference,
-`Cell`, `Vector` or list. A `UFix` has none. `Hashtable` has none either
-([#30](https://todo.sr.ht/~takeiteasy/sheaf/30)).
+`Cell`, `Vector`, `Hashtable` or list. A `UFix` has none.
 
 ## The rule
 
@@ -86,7 +85,6 @@ hold a reference into another local. A list or other cell may.
 
 ## Limitations
 
-- `Hashtable` is not checked: [#30](https://todo.sr.ht/~takeiteasy/sheaf/30).
 - The return-storage and branch-escape rules reject some safe programs:
   [#28](https://todo.sr.ht/~takeiteasy/sheaf/28).
 - The SBCL path does not run the check:
