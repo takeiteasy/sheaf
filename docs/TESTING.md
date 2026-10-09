@@ -26,8 +26,8 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `arrays.lisp` | Every prelude type and operation, run on SBCL, the interpreter and assigned stacks |
 | `bad-length.lisp` | A length type `define-length` does not declare |
 | `out-of-bounds.lisp` | An index past the end of an array |
-| `roots.lisp` | References stored outward, through a call, returned, merged by a match, passed round recursion and held by a tuple |
-| `roots-rejected.lisp` | Stores of a reference into storage that outlives its root: directly, through calls, into a parameter, into a global, out of a branch that frees what it points into, and through recursion |
+| `roots.lisp` | References stored outward and between storage freed together, through a call, returned, merged by a match, passed round recursion and held by a tuple |
+| `roots-rejected.lisp` | Stores of a reference into storage that outlives what it points into: directly, through an array that holds it, through calls, into a parameter, into a global, out of a branch that frees what it points into, and through recursion |
 | `escape.lisp` | A function passed to raw Lisp, which defunctionalization rejects |
 
 `tests/emit.lisp` compiles the emitted C with `$CC` (default `cc`), so `make test` needs a C compiler.

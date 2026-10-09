@@ -10,7 +10,7 @@ takes over from the typed IR.
 | Monomorphization | Specializes every binding at ground types; removes dictionaries ([MONOMORPHIZATION.md](MONOMORPHIZATION.md)) | `monomorphize.lisp` |
 | Defunctionalization | Turns function values into tagged unions ([CLOSURES.md](CLOSURES.md)) | `defunctionalize.lisp` |
 | Lowering | Turns the result into Sheaf's first-order IR ([IR.md](IR.md)) | `lower.lisp` |
-| Root checking | Rejects a reference stored where its root does not outlive it ([ROOTS.md](ROOTS.md)) | `roots.lisp` |
+| Root checking | Rejects a reference stored where what it points into is freed first ([ROOTS.md](ROOTS.md)) | `roots.lisp` |
 | Data stack assignment | Gives each cell and growable value a stack ([STACKS.md](STACKS.md)) | `stacks.lisp` |
 | C emitter | One C file per program ([EMITTER.md](EMITTER.md)) | `emit.lisp` |
 

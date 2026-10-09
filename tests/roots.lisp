@@ -30,7 +30,7 @@ upper case."
 (test accepted-references-run-on-every-tier
   (fixture-program "roots")
   (let ((expected (funcall (symbol-function (fixture-symbol "roots" "MAIN")))))
-    (is (= 86 expected))
+    (is (= 163 expected))
     (is (= expected (sheaf:run-lowered (lowered "roots"))))
     (is (= expected (sheaf:run-lowered (assigned "roots"))))))
 
@@ -70,7 +70,7 @@ upper case."
                (chain "VECTOR-PUSH-INNER")))
     (is (equal '("(arr:ref inner 0)" "(hashtable:set! outer 1 (arr:ref inner 0))")
                (chain "HASHTABLE-SET-INNER")))
-    (is (equal '("(cons 1 nil)" "(arr:set! outer 0 inner)")
+    (is (equal '("(cons (arr:ref g 0) nil)" "(arr:set! outer 0 inner)")
                (chain "STORE-LIST-INNER")))
     (is (equal '("(arr:ref inner 0)" "(arr:set! outer 0 (arr:ref inner 0))")
                (chain "STORE-INTO-PARAM")))
@@ -86,6 +86,12 @@ upper case."
                "(even-put n a r)" "(arr:set! a 0 r)")
              (chain-texts (root-error "RECURSIVE-STORE")))))
 
+(test a-store-names-the-array-that-holds-the-reference
+  (is (equal '("(arr:new 1 (arr:ref g 0))" "(arr:set! outer 0 a)")
+             (chain-texts (root-error "TRANSITIVE-STORE"))))
+  (is (equal '("(arr:new 1 (arr:ref base 0))" "(arr:set! outer 0 a)")
+             (chain-texts (root-error "TRANSITIVE-LATE-STORE")))))
+
 (test a-reference-cannot-outlive-its-branch
   (let ((condition (root-error "ESCAPE-GROWN")))
     (is-true condition)
@@ -98,8 +104,16 @@ upper case."
   (handler-case (progn (funcall thunk) "")
     (error (condition) (princ-to-string condition))))
 
-(test a-rejected-branch-escape-does-not-run-safely
-  (dolist (root '("ESCAPE-GROWN" "ESCAPE-OWNED" "ESCAPE-CALLED"))
+(test a-container-returned-from-its-branch-cannot-hold-a-branch-growable
+  (let ((condition (root-error "RETURNED-CONTAINER")))
+    (is-true condition)
+    (is (search "branch" (sheaf:specialization-error-message condition)))))
+
+(test a-rejected-program-does-not-run-safely
+  (dolist (root '("ESCAPE-GROWN" "ESCAPE-OWNED" "ESCAPE-CALLED" "RETURNED-CONTAINER"
+                  "REF-SET-INNER" "ARR-SET-INNER" "STORE-LIST-INNER" "CELL-WRITE-INNER"
+                  "VECTOR-PUSH-INNER" "HASHTABLE-SET-INNER" "PUSH-INNER" "STORE-THROUGH-CALL"
+                  "RECURSIVE-STORE" "TRANSITIVE-STORE" "TRANSITIVE-LATE-STORE"))
     (is-true (root-error root) "~a" root)
     (is (search "freed"
                 (error-message

@@ -1,14 +1,18 @@
 ;;;; roots.lisp
 ;;;; References stored where their roots outlive the storage: directly,
 ;;;; through a call, returned, merged by a match, passed round recursion, held
-;;;; by a tuple, and leaving a branch or a function that holds them.
+;;;; by a tuple, leaving a branch or a function that holds them, and stored
+;;;; between storage that is freed together.
 
 (defpackage #:sheaf/fixtures/roots
   (:use #:coalton #:coalton-prelude #:sheaf/prelude)
   (:local-nicknames
    (#:arr #:sheaf/prelude/arr)
+   (#:cell #:coalton/cell)
    (#:grow #:sheaf/prelude/grow)
-   (#:ref #:sheaf/prelude/ref)))
+   (#:hashtable #:coalton/hashtable)
+   (#:ref #:sheaf/prelude/ref)
+   (#:vector #:coalton/vector)))
 
 (in-package #:sheaf/fixtures/roots)
 
@@ -129,11 +133,120 @@
     (+ (+ (escape-branch) (use-returned))
        (+ (use-grown) (grown-branch 0))))
 
+  (declare ref-set-inner (Void -> UFix))
+  (define (ref-set-inner)
+    (let ((base (arr:new 1 1)))
+      (let ((outer (arr:new 1 (arr:ref base 0))))
+        (let ((slot (arr:ref outer 0)))
+          (let ((inner (arr:new 1 2)))
+            (ref:set! slot (arr:ref inner 0))
+            (ref:get (arr:index outer 0)))))))
+
+  (declare arr-set-inner (Void -> UFix))
+  (define (arr-set-inner)
+    (let ((base (arr:new 1 1)))
+      (let ((outer (arr:new 1 (arr:ref base 0))))
+        (let ((inner (arr:new 1 3)))
+          (arr:set! outer 0 (arr:ref inner 0))
+          (ref:get (arr:index outer 0))))))
+
+  (declare store-list-inner (Void -> UFix))
+  (define (store-list-inner)
+    (let ((outer (arr:new 1 (the (List UFix) Nil))))
+      (let ((inner (Cons 4 Nil)))
+        (arr:set! outer 0 inner)
+        (match (arr:index outer 0)
+          ((Cons x _) x)
+          ((Nil) 0)))))
+
+  (declare cell-write-inner (Void -> UFix))
+  (define (cell-write-inner)
+    (let ((base (arr:new 1 1)))
+      (let ((outer (cell:new (arr:ref base 0))))
+        (let ((inner (arr:new 1 5)))
+          (cell:write! outer (arr:ref inner 0))
+          (ref:get (cell:read outer))))))
+
+  (declare vector-push-inner (Void -> UFix))
+  (define (vector-push-inner)
+    (let ((outer (the (Vector (Ref UFix)) (vector:new))))
+      (let ((inner (arr:new 1 6)))
+        (vector:push! (arr:ref inner 0) outer)
+        (ref:get (vector:index-unsafe 0 outer)))))
+
+  (declare hashtable-set-inner (Void -> UFix))
+  (define (hashtable-set-inner)
+    (let ((outer (the (hashtable:HashTable UFix (Ref UFix)) (hashtable:new))))
+      (let ((inner (arr:new 1 7)))
+        (hashtable:set! outer 1 (arr:ref inner 0))
+        (match (hashtable:get outer 1)
+          ((Some r) (ref:get r))
+          ((None) 0)))))
+
+  (declare push-inner (Void -> UFix))
+  (define (push-inner)
+    (let ((outer (the (GrowArray (Ref UFix)) (grow:new))))
+      (let ((inner (arr:new 1 8)))
+        (grow:push! outer (arr:ref inner 0))
+        (ref:get (arr:index outer 0)))))
+
+  (declare store-through-call (Void -> UFix))
+  (define (store-through-call)
+    (let ((base (arr:new 1 1)))
+      (let ((outer (arr:new 1 (arr:ref base 0))))
+        (let ((inner (arr:new 1 9)))
+          (put outer (arr:ref inner 0))
+          (ref:get (arr:index outer 0))))))
+
+  (declare even-put (UFix * (Array (Ref UFix)) * (Ref UFix) -> Unit))
+  (define (even-put n a r)
+    (if (== n 0)
+        (arr:set! a 0 r)
+        (odd-put (- n 1) a r)))
+
+  (declare odd-put (UFix * (Array (Ref UFix)) * (Ref UFix) -> Unit))
+  (define (odd-put n a r)
+    (even-put n a r))
+
+  (declare recursive-store (Void -> UFix))
+  (define (recursive-store)
+    (let ((base (arr:new 1 1)))
+      (let ((outer (arr:new 1 (arr:ref base 0))))
+        (let ((inner (arr:new 1 10)))
+          (odd-put 3 outer (arr:ref inner 0))
+          (ref:get (arr:index outer 0))))))
+
+  (declare same-branch (Void -> UFix))
+  (define (same-branch)
+    (if (== (the UFix 1) 1)
+        (let ((g (the (GrowArray UFix) (grow:new))))
+          (grow:push! g 11)
+          (let ((a (arr:new 1 (arr:ref g 0))))
+            (arr:set! a 0 (arr:ref g 0))
+            (ref:get (arr:index a 0))))
+        0))
+
+  (declare two-growables (Void -> UFix))
+  (define (two-growables)
+    (if (== (the UFix 1) 1)
+        (let ((outer (the (GrowArray (Ref UFix)) (grow:new))))
+          (let ((inner (the (GrowArray UFix) (grow:new))))
+            (grow:push! inner 12)
+            (grow:push! outer (arr:ref inner 0))
+            (ref:get (arr:index outer 0))))
+        0))
+
+  (declare stores (Void -> UFix))
+  (define (stores)
+    (+ (+ (+ (ref-set-inner) (arr-set-inner)) (+ (store-list-inner) (cell-write-inner)))
+       (+ (+ (+ (vector-push-inner) (hashtable-set-inner)) (+ (push-inner) (store-through-call)))
+          (+ (+ (recursive-store) (same-branch)) (two-growables)))))
+
   (declare main (Void -> UFix))
   (define (main)
     (let ((a (arr:new 2 4)))
       (let ((b (arr:new 2 6)))
-        (+ (+ (+ (outer-into-inner) (via-put)) (+ (use-fresh) (escapes)))
+        (+ (+ (+ (outer-into-inner) (via-put)) (+ (+ (use-fresh) (escapes)) (stores)))
            (+ (+ (ref:get (pick 1 a b)) (ref:get (walk 3 (second-ref a))))
               (+ (ref:get (ping 2 (arr:ref a 0) (arr:ref b 0)))
                  (match (pair-of b)

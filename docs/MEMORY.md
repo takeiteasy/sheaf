@@ -29,8 +29,11 @@ never writes a lifetime.
 
 ```lisp
 (let ((outer (arr:new 1 (arr:ref base 0))))
-  (let ((inner (arr:new 1 0)))
-    (arr:set! outer 0 (arr:ref inner 0))))   ; error: inner does not outlive outer
+  (if (== n 0)
+      (let ((inner (grow:new)))
+        (grow:push! inner 7)
+        (arr:set! outer 0 (arr:ref inner 0)))   ; error: inner is freed before outer
+      (arr:set! outer 0 (arr:ref base 0))))
 ```
 
 [ROOTS.md](ROOTS.md) has the rules.
