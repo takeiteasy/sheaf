@@ -18,6 +18,10 @@
         :when (eq (sheaf:ir-def-origin def) (fixture-symbol fixture name))
           :collect def))
 
+(defun static-clones (fixture name)
+  "The clones of NAME that build their growable values on stacks of their own, not from a bank."
+  (remove-if #'sheaf:ir-def-bank (clones fixture name)))
+
 (defun constructs (def)
   (let ((nodes '()))
     (sheaf:walk-ir (lambda (node) (when (typep node 'sheaf:ir-construct) (push node nodes)))
@@ -260,7 +264,7 @@ body BODY-FN builds from a function that makes a call of `make`."
 
 (test growables-give-one-result-on-every-tier
   (let ((expected (run-on-sbcl "growables")))
-    (is (= 24 expected))
+    (is (= 36 expected))
     (is (= expected (sheaf:run-lowered (lowered "growables"))))
     (is (= expected (sheaf:run-lowered (assigned "growables"))))))
 
@@ -271,7 +275,7 @@ body BODY-FN builds from a function that makes a call of `make`."
     (is (= (sheaf:lowered-stack-count assigned) (nth-value 1 (sheaf:run-lowered assigned))))))
 
 (test each-vector-a-result-holds-has-a-stack-of-its-own
-  (dolist (two (clones "growables" "TWO"))
+  (dolist (two (static-clones "growables" "TWO"))
     (is (null (sheaf:ir-def-destination two)))
     (is (= 2 (length (remove-duplicates (sheaf:ir-def-growables two)))))
     (is (equal (growable-stacks-of two) (prim-stacks-of two)))))
@@ -320,9 +324,41 @@ body BODY-FN builds from a function that makes a call of `make`."
          (entry (call-to main "growables" "FILLED-DOWN")))
     (is (null (sheaf:ir-call-region entry)))))
 
-(test a-growable-built-at-every-level-of-a-cycle-is-rejected
-  (is (search "sheaf/31"
-              (error-text (lambda () (sheaf:assign-stacks (lowered-from "growables" "VECTORS-DOWN")))))))
+(defun banked-prims (def)
+  (let ((prims '()))
+    (sheaf:walk-ir (lambda (node) (when (and (typep node 'sheaf:ir-prim) (sheaf:ir-prim-bank node)) (push node prims)))
+                   (sheaf:ir-def-body def))
+    prims))
+
+(test a-cycle-that-builds-a-growable-at-every-level-hands-out-stacks-from-a-bank
+  (dolist (down (clones "growables" "VECTORS-DOWN"))
+    (is (integerp (sheaf:ir-def-bank down)))
+    (is (null (sheaf:ir-def-growables down)))
+    (let ((prims (banked-prims down)))
+      (is (= 1 (length prims)))
+      (is (null (sheaf:ir-prim-stack (first prims))))
+      (is (eql (sheaf:ir-def-bank down) (sheaf:ir-prim-bank (first prims)))))
+    (is (eql (sheaf:ir-def-bank down) (sheaf:ir-call-bank (first (calls down)))))))
+
+(test a-caller-that-drops-a-banked-result-owns-the-bank
+  (let* ((main (first (clones "growables" "MAIN-VECTORS"))) (found nil))
+    (sheaf:walk-ir (lambda (node)
+                     (when (and (typep node 'sheaf:ir-let) (sheaf:ir-let-bank node))
+                       (setf found node)))
+                   (sheaf:ir-def-body main))
+    (is (null (sheaf:ir-def-bank main)))
+    (is (integerp (sheaf:ir-let-bank found)))
+    (is (eql (sheaf:ir-let-bank found) (sheaf:ir-call-bank (sheaf:ir-let-value found))))))
+
+(test a-bank-reaches-a-callee-that-builds-in-a-banked-cycle
+  (dolist (down (clones "growables" "TWOS-DOWN"))
+    (is (integerp (sheaf:ir-def-bank down))))
+  (let ((two (find-if #'sheaf:ir-def-bank (clones "growables" "TWO"))))
+    (is (null (sheaf:ir-def-growables two)))
+    (is (= 2 (length (banked-prims two))))))
+
+(test a-banked-result-frees-its-stacks-with-its-owner
+  (is (= 36 (sheaf:run-lowered (assigned "growables")))))
 
 (test size-classes-come-from-the-prelude-types
   (is (eq :resizable (sheaf:size-class *growable*)))

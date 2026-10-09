@@ -14,6 +14,7 @@
 (defvar *stack-count*)
 (defvar *summaries*)
 (defvar *placements*)
+(defvar *banked*)
 
 ;;; Storage
 
@@ -109,12 +110,14 @@ on stacks of their own."
 
 ;;; Placements
 
-(defstruct (placement (:constructor make-placement (ordinary growables)))
+(defstruct (placement (:constructor make-placement (ordinary growables banked)))
   "What a def's result needs from its caller: whether an ordinary destination
-for cells and arrays, and how many stacks for growable values, one each."
-  (ordinary nil) (growables 0 :type fixnum))
+for cells and arrays, how many stacks for growable values, one each, and
+whether instead a bank, which hands out a stack for each growable value as the
+run builds it."
+  (ordinary nil) (growables 0 :type fixnum) (banked nil))
 
-(defparameter *no-placement* (make-placement nil 0))
+(defparameter *no-placement* (make-placement nil 0 nil))
 
 (defun callee-placement (call)
   (gethash (ir-call-function call) *placements* *no-placement*))
@@ -126,29 +129,33 @@ for cells and arrays, and how many stacks for growable values, one each."
        (or (typep node 'ir-foreign) (primitive-allocates (ir-prim-op node)))))
 
 (defun needs (node reaches reached)
-  "Whether NODE builds ordinary storage that reaches the result, and how many
-stacks it needs for growable values, when REACHES says its own result does.
-REACHED holds the names of the lets whose values reach the result."
+  "Whether NODE builds ordinary storage that reaches the result, how many
+stacks it needs for growable values, and whether it calls a def that needs a
+bank, when REACHES says its own result does. REACHED holds the names of the
+lets whose values reach the result."
   (etypecase node
-    (ir-atom (values nil 0))
-    (ir-foreign (values nil (if (and reaches (growable-site-p node)) 1 0)))
-    (ir-construct (values (and reaches (pooled-p (ir-node-type node))) 0))
-    (ir-prim (cond ((not (primitive-allocates (ir-prim-op node))) (values nil 0))
-                   ((growable-site-p node) (values nil (if reaches 1 0)))
-                   (t (values (and reaches t) 0))))
+    (ir-atom (values nil 0 nil))
+    (ir-foreign (values nil (if (and reaches (growable-site-p node)) 1 0) nil))
+    (ir-construct (values (and reaches (pooled-p (ir-node-type node))) 0 nil))
+    (ir-prim (cond ((not (primitive-allocates (ir-prim-op node))) (values nil 0 nil))
+                   ((growable-site-p node) (values nil (if reaches 1 0) nil))
+                   (t (values (and reaches t) 0 nil))))
     (ir-call (let ((placement (callee-placement node)))
                (values (and reaches (placement-ordinary placement))
-                       (if reaches (placement-growables placement) 0))))
-    (ir-let (multiple-value-bind (ordinary growables)
+                       (if reaches (placement-growables placement) 0)
+                       (and reaches (placement-banked placement)))))
+    (ir-let (multiple-value-bind (ordinary growables banked)
                 (needs (ir-let-value node) (gethash (ir-let-name node) reached) reached)
-              (multiple-value-bind (body-ordinary body-growables) (needs (ir-let-body node) reaches reached)
-                (values (or ordinary body-ordinary) (+ growables body-growables)))))
-    (ir-match (let ((ordinary nil) (growables 0))
-                (dolist (branch (ir-match-branches node) (values ordinary growables))
-                  (multiple-value-bind (branch-ordinary branch-growables)
+              (multiple-value-bind (body-ordinary body-growables body-banked)
+                  (needs (ir-let-body node) reaches reached)
+                (values (or ordinary body-ordinary) (+ growables body-growables) (or banked body-banked)))))
+    (ir-match (let ((ordinary nil) (growables 0) (banked nil))
+                (dolist (branch (ir-match-branches node) (values ordinary growables banked))
+                  (multiple-value-bind (branch-ordinary branch-growables branch-banked)
                       (needs (ir-branch-body branch) reaches reached)
                     (setf ordinary (or ordinary branch-ordinary)
-                          growables (max growables branch-growables))))))))
+                          growables (max growables branch-growables)
+                          banked (or banked branch-banked))))))))
 
 (defun returns-own-name-p (let-node)
   "Whether LET-NODE ends by returning the value it binds."
@@ -168,10 +175,21 @@ REACHED holds the names of the lets whose values reach the result."
     (ir-match (reduce #'max (ir-match-branches node) :key (lambda (branch) (tail-need (ir-branch-body branch)))
                                                       :initial-value 0))))
 
+(defun tail-banked-p (node)
+  "Whether the growable values NODE returns need a bank."
+  (etypecase node
+    ((or ir-atom ir-construct ir-prim ir-foreign) nil)
+    (ir-call (placement-banked (callee-placement node)))
+    (ir-let (tail-banked-p (if (returns-own-name-p node) (ir-let-value node) (ir-let-body node))))
+    (ir-match (some (lambda (branch) (tail-banked-p (ir-branch-body branch)))
+                    (ir-match-branches node)))))
+
 (defun def-placement (def)
-  (multiple-value-bind (ordinary growables)
+  (multiple-value-bind (ordinary growables banked)
       (needs (ir-def-body def) (fresh-p (ir-def-name def)) (reached-table def))
-    (make-placement ordinary growables)))
+    (if (or banked (gethash (ir-def-name def) *banked*))
+        (make-placement ordinary 0 t)
+        (make-placement ordinary growables nil))))
 
 (defun cycle-bound (members defs)
   "The most stacks the growable values of the defs MEMBERS can need unless a
@@ -186,8 +204,10 @@ growable value is built at every level of their recursion."
                (ir-def-body (gethash name defs))))))
 
 (defun compute-placements (defs)
-  "A table from the name of each def in DEFS to its `placement`."
-  (let ((*placements* (make-hash-table :test 'eq)))
+  "A table from the name of each def in DEFS to its `placement`. A cycle that
+builds a growable value at every level of its recursion needs a bank."
+  (let ((*placements* (make-hash-table :test 'eq))
+        (*banked* (make-hash-table :test 'eq)))
     (dolist (members (strongly-connected-components
                       (loop :for name :being :the :hash-keys :of defs :collect name)
                       (lambda (name) (callees (gethash name defs)))))
@@ -197,12 +217,10 @@ growable value is built at every level of their recursion."
         (loop :for changed := nil
               :do (dolist (name members)
                     (let ((new (def-placement (gethash name defs))))
-                      ;; TODO: a cycle that builds a growable value at every level is rejected,
-                      ;; a region of stacks that grows with the recursion would place it.
-                      ;; https://todo.sr.ht/~takeiteasy/sheaf/31
                       (when (> (placement-growables new) bound)
-                        (error "~s builds a growable value at every level of its recursive cycle: https://todo.sr.ht/~~takeiteasy/sheaf/31"
-                               name))
+                        (dolist (member members)
+                          (setf (gethash member *banked*) t))
+                        (setf changed t))
                       (unless (equalp new (gethash name *placements*))
                         (setf changed t
                               (gethash name *placements*) new))))
@@ -250,24 +268,24 @@ cycle's members and whether they build storage, which needs a region."
     (dotimes (i count (nreverse stacks))
       (push (take-index (reduce #'with-index stacks :initial-value busy)) stacks))))
 
-(defun clone-def (name destination growables region busy)
+(defun clone-def (name destination growables bank region busy)
   "The name of the clone of the def NAME for a context: the stack its result is
-built on, the stacks its growable values are built on, the region its cycle
-allocates in, and the stacks in use on entry."
-  (let ((key (list name destination growables region busy)))
+built on, the stacks its growable values are built on or the bank that hands
+them out, the region its cycle allocates in, and the stacks in use on entry."
+  (let ((key (list name destination growables bank region busy)))
     (or (gethash key *clones*)
-        (let ((clone (make-symbol (format nil "~a[~@[dest ~d ~]~@[grow~{ ~d~} ~]~@[region ~d ~]busy~{ ~d~}]"
-                                          (symbol-name name) destination growables region busy))))
+        (let ((clone (make-symbol (format nil "~a[~@[dest ~d ~]~@[grow~{ ~d~} ~]~@[bank ~d ~]~@[region ~d ~]busy~{ ~d~}]"
+                                          (symbol-name name) destination growables bank region busy))))
           (setf (gethash key *clones*) clone)
           (setf (gethash clone *defs*)
-                (assign-def (gethash name (lowered-defs *lowered*)) clone destination growables region busy))
+                (assign-def (gethash name (lowered-defs *lowered*)) clone destination growables bank region busy))
           clone))))
 
 (defun global-clone (name)
-  (destructuring-bind (&optional destination &rest growables) (gethash name *globals*)
-    (clone-def name destination growables nil *global-busy*)))
+  (destructuring-bind (&optional destination bank &rest growables) (gethash name *globals*)
+    (clone-def name destination growables bank nil *global-busy*)))
 
-(defun assign-def (def clone destination growables region entry-busy)
+(defun assign-def (def clone destination growables bank region entry-busy)
   (let* ((cycle (gethash (ir-def-name def) *cycles*))
          (reached (reached-table def))
          (pool (if cycle
@@ -289,30 +307,38 @@ allocates in, and the stacks in use on entry."
                      (setf (ir-global-name copy) (global-clone (ir-global-name node)))
                      copy)
                    node))
-             (rewrite-call (node reaches busy owned supply)
+             (rewrite-call (node reaches busy owned supply owned-bank)
                (let* ((callee (ir-call-function node))
                       (callee-cycle (gethash callee *cycles*))
                       (placement (callee-placement node))
                       (dest (and (placement-ordinary placement) (storage-stack reaches)))
-                      (stacks (growable-stacks (placement-growables placement) reaches owned supply))
+                      (call-bank (and (or (placement-banked placement)
+                                          (and bank reaches (plusp (placement-growables placement))))
+                                      (or (if reaches bank owned-bank)
+                                          (error "~s has no bank to build a growable result in"
+                                                 (ir-def-name def)))))
+                      (stacks (if call-bank
+                                  '()
+                                  (growable-stacks (placement-growables placement) reaches owned supply)))
                       (copy (copy-ir-call node)))
                  (setf (ir-call-args copy) (mapcar #'rewrite-atom (ir-call-args node))
                        (ir-call-destination copy) dest
                        (ir-call-growables copy) stacks
+                       (ir-call-bank copy) call-bank
                        (ir-call-function copy)
                        (cond ((and callee-cycle (eq callee-cycle cycle))
                               (when (set-difference busy entry-busy)
                                 (error "~s keeps a growable local across a call back into its recursive cycle: https://todo.sr.ht/~~takeiteasy/sheaf/10"
                                        (ir-def-name def)))
-                              (clone-def callee dest stacks region entry-busy))
+                              (clone-def callee dest stacks call-bank region entry-busy))
                              (callee-cycle
                               (let* ((own-region (and (null dest) (cdr callee-cycle) (take-index busy)))
                                      (callee-region (or dest own-region)))
                                 (setf (ir-call-region copy) own-region)
-                                (clone-def callee dest stacks callee-region (with-index busy callee-region))))
-                             (t (clone-def callee dest stacks nil busy))))
+                                (clone-def callee dest stacks call-bank callee-region (with-index busy callee-region))))
+                             (t (clone-def callee dest stacks call-bank nil busy))))
                  copy))
-             (rewrite (node reaches busy owned supply)
+             (rewrite (node reaches busy owned supply owned-bank)
                (etypecase node
                  ((or ir-literal ir-local ir-foreign) node)
                  (ir-global (rewrite-atom node))
@@ -321,14 +347,19 @@ allocates in, and the stacks in use on entry."
                          (reaches-value (gethash (ir-let-name node) reached))
                          (returned (and (not reaches-value) (returns-own-name-p node)))
                          (stacks (unless (or reaches-value returned) (take-stacks (tail-need value) busy)))
-                         (inner (reduce #'with-index stacks :initial-value busy))
+                         (let-bank (and (not reaches-value) (not returned) (tail-banked-p value)
+                                        (take-index (reduce #'with-index stacks :initial-value busy))))
+                         (inner (with-index (reduce #'with-index stacks :initial-value busy) let-bank))
                          (used (nth-value 1 (needs value reaches-value reached)))
                          (copy (copy-ir-let node)))
                     (setf (ir-let-stacks copy) stacks
-                          (ir-let-value copy) (rewrite value reaches-value inner (if returned owned stacks) supply)
-                          (ir-let-body copy) (rewrite (ir-let-body node) reaches inner owned (nthcdr used supply)))
+                          (ir-let-bank copy) let-bank
+                          (ir-let-value copy) (rewrite value reaches-value inner (if returned owned stacks) supply
+                                                       (if returned owned-bank let-bank))
+                          (ir-let-body copy) (rewrite (ir-let-body node) reaches inner owned (nthcdr used supply)
+                                                      owned-bank))
                     copy))
-                 (ir-call (rewrite-call node reaches busy owned supply))
+                 (ir-call (rewrite-call node reaches busy owned supply owned-bank))
                  (ir-construct
                   (let ((copy (copy-ir-construct node)))
                     (setf (ir-construct-args copy) (mapcar #'rewrite-atom (ir-construct-args node)))
@@ -339,10 +370,12 @@ allocates in, and the stacks in use on entry."
                   (let ((copy (copy-ir-prim node)))
                     (setf (ir-prim-args copy) (mapcar #'rewrite-atom (ir-prim-args node)))
                     (when (primitive-allocates (ir-prim-op node))
-                      (setf (ir-prim-stack copy)
-                            (if (resizable-node-p node)
-                                (first (growable-stacks 1 reaches owned supply))
-                                (storage-stack reaches))))
+                      (cond ((not (resizable-node-p node))
+                             (setf (ir-prim-stack copy) (storage-stack reaches)))
+                            ((and bank reaches)
+                             (setf (ir-prim-bank copy) bank))
+                            (t
+                             (setf (ir-prim-stack copy) (first (growable-stacks 1 reaches owned supply))))))
                     copy))
                  (ir-match
                   (let ((copy (copy-ir-match node)))
@@ -351,19 +384,21 @@ allocates in, and the stacks in use on entry."
                           (loop :for branch :in (ir-match-branches node)
                                 :collect (let ((branch-copy (copy-ir-branch branch)))
                                            (setf (ir-branch-body branch-copy)
-                                                 (rewrite (ir-branch-body branch) reaches busy owned supply))
+                                                 (rewrite (ir-branch-body branch) reaches busy owned supply owned-bank))
                                            branch-copy)))
                     copy)))))
       (setf (ir-def-name new) clone
             (ir-def-source new) (ir-def-name def)
             (ir-def-destination new) destination
             (ir-def-growables new) growables
+            (ir-def-bank new) bank
             (ir-def-pool new) (and (not cycle) pool)
             (ir-def-body new) (rewrite (ir-def-body def)
                                        (fresh-p (ir-def-name def))
                                        (with-index entry-busy pool)
                                        '()
-                                       growables))
+                                       growables
+                                       '()))
       new)))
 
 (defun check-distinct (name indices)
@@ -397,18 +432,28 @@ stack below its stack count. Returns T."
                                           (length (ir-def-growables callee))))
                                  (dolist (index (ir-call-growables node))
                                    (check-index index "a call's growable result"))
-                                 (check-distinct name (cons (ir-call-destination node) (ir-call-growables node))))
+                                 (when (ir-call-bank node)
+                                   (check-index (ir-call-bank node) "a call's bank"))
+                                 (check-distinct name (list* (ir-call-destination node) (ir-call-bank node)
+                                                             (ir-call-growables node))))
                                (when (ir-call-region node)
                                  (check-index (ir-call-region node) "a call's region")))
-                      (ir-prim (when (primitive-allocates (ir-prim-op node))
-                                 (check-index (ir-prim-stack node) "an array")))
+                      (ir-prim (cond ((ir-prim-bank node)
+                                      (unless (eql (ir-prim-bank node) (ir-def-bank def))
+                                        (error "~s: a growable value is built in a bank the def does not have" name)))
+                                     ((primitive-allocates (ir-prim-op node))
+                                      (check-index (ir-prim-stack node) "an array"))))
                       (ir-let (dolist (index (ir-let-stacks node))
                                 (check-index index "a growable local"))
-                              (check-distinct name (ir-let-stacks node)))))
+                              (when (ir-let-bank node)
+                                (check-index (ir-let-bank node) "a bank"))
+                              (check-distinct name (cons (ir-let-bank node) (ir-let-stacks node))))))
                   (ir-def-body def))
          (dolist (index (ir-def-growables def))
            (check-index index "a growable result"))
-         (check-distinct name (cons (ir-def-destination def) (ir-def-growables def)))
+         (when (ir-def-bank def)
+           (check-index (ir-def-bank def) "a bank"))
+         (check-distinct name (list* (ir-def-destination def) (ir-def-bank def) (ir-def-growables def)))
          (when (ir-def-pool def)
            (check-index (ir-def-pool def) "a pool"))))
      (lowered-defs lowered))
@@ -439,8 +484,10 @@ called in, so every stack index is a constant. Returns the new program, whose
                           (setf *global-busy* (with-index *global-busy* index))
                           index)))
                  (setf (gethash name *globals*)
-                       (cons (and (placement-ordinary placement) (take))
-                             (loop :repeat (placement-growables placement) :collect (take))))))))
+                       (let* ((destination (and (placement-ordinary placement) (take)))
+                              (bank (and (placement-banked placement) (take))))
+                         (list* destination bank
+                                (loop :repeat (placement-growables placement) :collect (take)))))))))
       (maphash (lambda (name def)
                  (when (eq (ir-def-kind def) :value)
                    (take-global name)))

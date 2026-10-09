@@ -21,6 +21,7 @@ ends, and a returned value is built on stacks its caller gives the function.
 | An array | By its size class[^class]: a growable as below, any other like a cell |
 | A growable value the result holds | One of the function's growable stacks, one for each such value, chosen by its caller |
 | A growable local | A stack of its own for the rest of its `let` |
+| A growable value a recursive cycle builds at every level | A stack the run takes from a bank[^bank] |
 
 The result holds a cell when its roots reach it[^reach]: directly, through the
 fields of another cell, or through a value stored into an array or `Cell`
@@ -69,6 +70,27 @@ A cycle allocates in one region and frees it when the call into the cycle
 returns. The region is the destination of the call into the cycle, or a stack
 that call takes for itself when the result holds no storage[^region].
 
+## Banks
+
+A cycle that builds a growable value at every level, such as `vectors-down`,
+needs a number of stacks that only the run knows. Its result takes a bank in
+place of growable stacks: the caller passes a stack index that names the bank,
+and each growable value the cycle builds takes a stack of its own from it.
+
+```lisp
+(define (vectors-down n)                         ; a destination and a bank
+  (let ((v (vector:new)))
+    (if (== n 0) Nil (Cons v (vectors-down (- n 1))))))
+```
+
+The bank belongs to whoever owns the result: the `let` that drops it, or the
+caller's own bank when the result reaches the caller's result. A callee that
+builds growable values and is called by a banked def takes the bank too.
+
+```text
+VECTORS-DOWN<UFIX → LIST (VECTOR UFIX)>{12}[dest 1 bank 2 busy 0 1 2]
+```
+
 ## Results
 
 | Slot | Holds |
@@ -76,12 +98,16 @@ that call takes for itself when the result holds no storage[^region].
 | `ir-construct-stack` | The stack a cell is pushed to |
 | `ir-call-destination` | The stack the cells and arrays of a result are built on |
 | `ir-call-growables` | The stacks the growable values of a result are built on |
+| `ir-call-bank` | The bank a result's growable values are built from |
 | `ir-call-region` | A region the call takes and frees |
 | `ir-let-stacks` | The stacks the growable values a `let` binds own |
+| `ir-let-bank` | The bank a `let` owns for a result it drops |
+| `ir-prim-bank` | The bank a growable value takes its stack from |
 | `ir-prim-stack` | The stack an array is pushed to |
 | `ir-def-pool` | The pool a clone owns |
 | `ir-def-destination` | The destination a clone's cells and arrays are built on |
 | `ir-def-growables` | The stacks a clone's growable values are built on |
+| `ir-def-bank` | The bank a clone's growable values are built from |
 | `ir-def-source` | The def a clone was cloned from |
 | `lowered-stack-count` | The number of stacks the program needs |
 
@@ -92,8 +118,9 @@ freed.
 
 ## Limitations
 
-- A recursive cycle that builds a growable value at every level is an error:
-  [#31](https://todo.sr.ht/~takeiteasy/sheaf/31).
+- A bank is only simulated: C needs stacks handed out at run time, and a
+  47-bit address space holds about 30,000 of its 4 GiB stacks:
+  [#27](https://todo.sr.ht/~takeiteasy/sheaf/27).
 - A cycle keeps what it allocates until the call into it returns:
   [#11](https://todo.sr.ht/~takeiteasy/sheaf/11).
 - A growable local live across a call back into its own cycle is an error.
@@ -111,6 +138,11 @@ freed.
     each growable site that reaches it and the callee's count for each call.
     Branches share stacks. A recursive cycle repeats until its counts stop
     changing.
+[^bank]: A bank is a stack index. The interpreter hands out a new simulated
+    stack for each growable value built from it and frees them all when the
+    bank's owner ends. `compute-placements` marks a cycle banked when its
+    growable count would grow with the recursion, and a def that reaches a
+    banked call is banked too. See [Limitations](#limitations) for C.
 [^region]: A cycle of functions whose results hold no storage and that build
     no cells or arrays takes no region. Growable values go on stacks of their
     own, so a cycle that builds only those takes none either.

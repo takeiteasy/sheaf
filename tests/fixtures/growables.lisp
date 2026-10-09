@@ -62,6 +62,36 @@
           Nil
           (Cons v (vectors-down (- n 1))))))
 
+  (declare vector-count (List (vector:Vector UFix) -> UFix))
+  (define (vector-count vectors)
+    (match vectors
+      ((Nil) 0)
+      ((Cons v rest)
+       (vector:push! 9 v)
+       (+ (vector:length v) (vector-count rest)))))
+
+  (declare main-vectors (Void -> UFix))
+  (define (main-vectors)
+    (vector-count (vectors-down 3)))
+
+  (declare twos-down (UFix -> (List (Tuple (vector:Vector UFix) (vector:Vector UFix)))))
+  (define (twos-down n)
+    (if (== n 0)
+        Nil
+        (Cons (two n) (twos-down (- n 1)))))
+
+  (declare twos-count (List (Tuple (vector:Vector UFix) (vector:Vector UFix)) -> UFix))
+  (define (twos-count pairs)
+    (match pairs
+      ((Nil) 0)
+      ((Cons (Tuple a b) rest)
+       (vector:push! 9 b)
+       (+ (vector:length a) (+ (vector:length b) (twos-count rest))))))
+
+  (declare main-twos (Void -> UFix))
+  (define (main-twos)
+    (twos-count (twos-down 3)))
+
   (declare picked (UFix -> UFix))
   (define (picked n)
     (let ((x (if (== n 0)
@@ -150,4 +180,4 @@
           (+ (main-relay)
              (+ (main-either)
                 (+ (main-listed)
-                   (+ (main-down) (+ (main-picked) (+ (main-cell) (main-table)))))))))))
+                   (+ (main-down) (+ (main-picked) (+ (main-cell) (+ (main-table) (+ (main-vectors) (main-twos)))))))))))))

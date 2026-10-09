@@ -55,16 +55,16 @@
    #:ir-constructor #:ir-constructor-name #:ir-constructor-tag #:ir-constructor-fields
    #:ir-def #:ir-def-name #:ir-def-origin #:ir-def-kind #:ir-def-params
    #:ir-def-result #:ir-def-body #:ir-def-location
-   #:ir-def-source #:ir-def-destination #:ir-def-growables #:ir-def-pool
+   #:ir-def-source #:ir-def-destination #:ir-def-growables #:ir-def-bank #:ir-def-pool
    #:ir-node #:ir-node-type #:ir-node-location
    #:ir-atom
    #:ir-literal #:ir-literal-value
    #:ir-local #:ir-local-name
    #:ir-global #:ir-global-name
-   #:ir-let #:ir-let-name #:ir-let-value #:ir-let-body #:ir-let-stacks
-   #:ir-call #:ir-call-function #:ir-call-args #:ir-call-destination #:ir-call-growables #:ir-call-region
+   #:ir-let #:ir-let-name #:ir-let-value #:ir-let-body #:ir-let-stacks #:ir-let-bank
+   #:ir-call #:ir-call-function #:ir-call-args #:ir-call-destination #:ir-call-growables #:ir-call-bank #:ir-call-region
    #:ir-construct #:ir-construct-constructor #:ir-construct-args #:ir-construct-stack
-   #:ir-prim #:ir-prim-op #:ir-prim-args #:ir-prim-stack
+   #:ir-prim #:ir-prim-op #:ir-prim-args #:ir-prim-stack #:ir-prim-bank
    #:ir-foreign #:ir-foreign-vars #:ir-foreign-form
    #:ir-match #:ir-match-scrutinee #:ir-match-branches
    #:ir-branch #:ir-branch-pattern #:ir-branch-body

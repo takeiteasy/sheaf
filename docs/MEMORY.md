@@ -51,6 +51,9 @@ A recursive cycle builds everything in one region, owned by the call into the
 cycle and freed when it returns. Nothing is rejected for keeping a list across a
 recursive call, as Goose rejects it.
 
+A cycle that builds a growable value at every level takes them from a bank the
+caller owns, since growable values cannot share a stack ([STACKS.md](STACKS.md#banks)).
+
 ## Coalton's data
 
 Coalton's immutable data reads the same whether it is copied or shared, so

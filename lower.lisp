@@ -39,10 +39,10 @@
 (defstruct (ir-literal (:include ir-node)) value)
 (defstruct (ir-local (:include ir-node)) name)
 (defstruct (ir-global (:include ir-node)) name)
-(defstruct (ir-let (:include ir-node)) name value body (stacks '()))
-(defstruct (ir-call (:include ir-node)) function args (destination nil) (growables '()) (region nil))
+(defstruct (ir-let (:include ir-node)) name value body (stacks '()) (bank nil))
+(defstruct (ir-call (:include ir-node)) function args (destination nil) (growables '()) (bank nil) (region nil))
 (defstruct (ir-construct (:include ir-node)) constructor args (stack nil))
-(defstruct (ir-prim (:include ir-node)) op args (stack nil))
+(defstruct (ir-prim (:include ir-node)) op args (stack nil) (bank nil))
 (defstruct (ir-foreign (:include ir-node)) vars form)
 (defstruct (ir-match (:include ir-node)) scrutinee branches)
 (defstruct ir-branch pattern body)
@@ -61,10 +61,10 @@
 
 (defstruct (ir-def (:constructor make-ir-def (name origin kind params result body location)))
   "A global. A `:function` has parameters, each a name and a type; a `:value`
-has none. Stack assignment clones a def per context and fills the last four
+has none. Stack assignment clones a def per context and fills the last five
 slots."
   name origin kind params result body location
-  (source nil) (destination nil) (growables '()) (pool nil))
+  (source nil) (destination nil) (growables '()) (bank nil) (pool nil))
 
 (defstruct (lowered (:constructor %make-lowered))
   "A program in Sheaf's IR: its globals, the constructors of every data type it
