@@ -28,7 +28,7 @@ on stacks the compiler assigns, and memory is freed when its scope ends.
 
 ## Building
 
-Needs SBCL and Quicklisp.
+Needs SBCL, Quicklisp and a C compiler.
 
 ```sh
 git clone --recursive git@github.com:takeiteasy/sheaf.git

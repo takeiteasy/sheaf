@@ -28,9 +28,23 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `out-of-bounds.lisp` | An index past the end of an array |
 | `roots.lisp` | References stored outward and between storage freed together, through a call, returned, merged by a match, passed round recursion and held by a tuple |
 | `roots-rejected.lisp` | Stores of a reference into storage that outlives what it points into: directly, through an array that holds it, through calls, into a parameter, into a global, out of a branch that frees what it points into, and through recursion |
+| `cells.lisp` | Cells built locally, returned, swapped and captured by a closure |
+| `growables.lisp` | Results that hold growable values, each on a stack of its own, and cycles that build them at every level |
+| `growable-recursion.lisp` | A growable local kept across a call back into its recursive cycle, which stack assignment rejects |
+| `hashtables.lisp` | Hash tables built locally and returned, and every operation on them |
+| `own-indexed.lisp` | A program's own instance of the prelude's `Indexed` class, which stays an ordinary function |
+| `placement.lisp` | Where storage is built when a result holds only some of it |
+| `vectors.lisp` | Vectors built locally and returned, and every operation on them |
 | `escape.lisp` | A function passed to raw Lisp, which defunctionalization rejects |
 
 `tests/emit.lisp` compiles the emitted C with `$CC` (default `cc`), so `make test` needs a C compiler.
+
+## CI
+
+`.github/workflows/test.yml` runs `make test` on Ubuntu with `CC=gcc` and
+`CC=clang`, on pushes and pull requests to `trunk`. Docs-only changes skip it,
+and a newer push cancels the run it supersedes. SBCL 2.6.8 comes from a pinned
+binary release. `workflow_dispatch` runs it by hand.
 
 `make test` loads `vendor/coalton` ahead of any Coalton Quicklisp has. It
 reads `QUICKLISP` (default `~/quicklisp/setup.lisp`) and `SBCL`.

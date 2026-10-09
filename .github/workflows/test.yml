@@ -1,0 +1,59 @@
+name: Test
+
+on:
+  push:
+    branches: [trunk]
+    paths-ignore: ['docs/**', '**.md', 'LICENSE']
+  pull_request:
+    branches: [trunk]
+    paths-ignore: ['docs/**', '**.md', 'LICENSE']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SBCL_VERSION: 2.6.8
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - run: sudo apt-get update && sudo apt-get install -y libgmp-dev libmpfr-dev clang
+
+      - uses: actions/cache@v4
+        id: sbcl
+        with:
+          path: ~/sbcl
+          key: sbcl-${{ env.SBCL_VERSION }}
+      - if: steps.sbcl.outputs.cache-hit != 'true'
+        run: |
+          curl -sSL "https://downloads.sourceforge.net/project/sbcl/sbcl/$SBCL_VERSION/sbcl-$SBCL_VERSION-x86-64-linux-binary.tar.bz2" | tar xj
+          (cd sbcl-$SBCL_VERSION-x86-64-linux && INSTALL_ROOT=$HOME/sbcl sh install.sh)
+      - run: |
+          echo "$HOME/sbcl/bin" >> "$GITHUB_PATH"
+          echo "SBCL_HOME=$HOME/sbcl/lib/sbcl" >> "$GITHUB_ENV"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/quicklisp
+          key: quicklisp-${{ hashFiles('sheaf.asd', 'prelude/**', '.gitmodules') }}
+          restore-keys: quicklisp-
+      - run: |
+          if [ ! -e ~/quicklisp/setup.lisp ]; then
+            curl -sSLO https://beta.quicklisp.org/quicklisp.lisp
+            sbcl --non-interactive --load quicklisp.lisp --eval '(quicklisp-quickstart:install)'
+          fi
+
+      - run: make test
+        env:
+          CC: ${{ matrix.cc }}
