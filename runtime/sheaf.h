@@ -6,6 +6,7 @@
 #define _DEFAULT_SOURCE
 #endif
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,6 +51,47 @@ static SHEAF_UNUSED void *sheaf_push(sheaf_stack *stack, size_t size, size_t ali
     }
     stack->top = (char *)(top + size);
     return (void *)top;
+}
+
+static SHEAF_UNUSED uint64_t sheaf_index(uint64_t index, uint64_t length) {
+    if (index >= length) {
+        fprintf(stderr, "the index %llu is outside the array of %llu elements\n",
+                (unsigned long long)index, (unsigned long long)length);
+        exit(1);
+    }
+    return index;
+}
+
+static SHEAF_UNUSED void sheaf_range(uint64_t lo, uint64_t hi, uint64_t length) {
+    if (lo > hi || hi > length) {
+        fprintf(stderr, "the range %llu to %llu is outside the array of %llu elements\n",
+                (unsigned long long)lo, (unsigned long long)hi, (unsigned long long)length);
+        exit(1);
+    }
+}
+
+static SHEAF_UNUSED SHEAF_NORETURN void sheaf_grew_under(sheaf_stack *stack) {
+    fprintf(stderr, "a growable value on stack %d grew under another value\n", stack->index);
+    exit(1);
+}
+
+/* Room for SIZE more bytes after END, the end of a growable value, which must be on top of STACK. */
+static SHEAF_UNUSED void *sheaf_grow(sheaf_stack *stack, void *end, size_t size) {
+    if ((char *)end != stack->top)
+        sheaf_grew_under(stack);
+    if ((size_t)(stack->limit - stack->top) < size) {
+        fprintf(stderr, "data stack %d exhausted\n", stack->index);
+        exit(1);
+    }
+    stack->top += size;
+    return end;
+}
+
+/* Give back the elements of a growable value from NEW_END up to END, which must be on top of STACK. */
+static SHEAF_UNUSED void sheaf_shrink(sheaf_stack *stack, void *end, void *new_end) {
+    if ((char *)end != stack->top)
+        sheaf_grew_under(stack);
+    stack->top = new_end;
 }
 
 static SHEAF_UNUSED SHEAF_NORETURN void sheaf_no_match(void) {

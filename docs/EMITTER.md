@@ -53,6 +53,11 @@ The excerpt omits `SHEAF_UNUSED` attributes and temporaries.
 | `UFix` | `uint64_t` |
 | A data type that contains itself | `struct Tn *`, a cell on a data stack[^links] |
 | Any other data type | `struct Tn` by value: a `tag` and a union of the constructors' fields |
+| `FixedArray`, `Array` | `struct An *`: a `length` and the elements[^layout] |
+| `GrowArray`, `Stack`, `Vector` | `struct Gn *`: the stack it grows on, a `length` and the elements |
+| `Slice` | `struct Sn` by value: a pointer to the first element and a `length` |
+| `Ref`, `Cell` | A pointer to the element |
+| `HashTable` | An emit error: [#32](https://todo.sr.ht/~takeiteasy/sheaf/32) |
 | Any other scalar | An emit error |
 
 ## Stacks
@@ -62,6 +67,8 @@ The excerpt omits `SHEAF_UNUSED` attributes and temporaries.
 | A stack | An entry in `sheaf_stacks`, reserved with `mmap` at startup |
 | A cell on stack `n` | `sheaf_push(&sheaf_stacks[n], …)` |
 | A pool or region | The stack's `top` saved on entry and restored on exit |
+| A growable local's stacks | The stacks' `top` saved before its `let` and restored after the body |
+| A growable value | Pushed to its own stack and grown in place; an index or range outside it, or a push when another value is above it, prints a message and exits |
 
 `SHEAF_STACK_SIZE` sets each stack's size (4 GiB by default, reserved, not
 committed). A push past the end prints `data stack n exhausted` and exits.
@@ -83,13 +90,18 @@ committed). A push past the end prints `data stack n exhausted` and exits.
   [#13](https://todo.sr.ht/~takeiteasy/sheaf/13).
 - Raw Lisp is an error: [#16](https://todo.sr.ht/~takeiteasy/sheaf/16),
   [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
-- Arrays, slices, references, `Cell`, `Vector` and `Hashtable`: [#27](https://todo.sr.ht/~takeiteasy/sheaf/27).
+- `HashTable`: [#32](https://todo.sr.ht/~takeiteasy/sheaf/32).
+- A result that takes a bank, from a recursive cycle that builds a growable value at every level:
+  [#33](https://todo.sr.ht/~takeiteasy/sheaf/33).
 - Only `UFix` and the data types built from it are emitted:
   [#23](https://todo.sr.ht/~takeiteasy/sheaf/23).
 - `UFix` arithmetic wraps at 64 bits: [#9](https://todo.sr.ht/~takeiteasy/sheaf/9).
 - Cells are linked by pointers, not relative references:
   [#26](https://todo.sr.ht/~takeiteasy/sheaf/26).
 
+[^layout]: The elements follow the header at `offsetof(struct, e)`, so the first
+    element is where the push started. `An`, `Gn` and `Sn` are shared by every
+    array type with the same element type.
 [^links]: A pointer into a data stack stays valid because nothing on a stack
     moves. [MEMORY.md](MEMORY.md) describes the smaller relative links the
     pointers will become.

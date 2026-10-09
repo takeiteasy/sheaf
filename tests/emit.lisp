@@ -49,12 +49,38 @@ and exit code."
 (test raw-lisp-is-not-emitted
   (signals error (sheaf:emit-c (assigned "counter"))))
 
-(test references-are-not-emitted
-  (signals error
-    (sheaf:emit-c (hand-built *number*
-                              (lambda (make-call)
-                                (sheaf::make-ir-let :name 'v :value (funcall make-call)
-                                                    :type *number* :body (zero)))))))
+(defun c-result-from (fixture root)
+  "The result of the C program for the function ROOT of FIXTURE, and the interpreter's."
+  (let ((assigned (sheaf:assign-stacks (lowered-from fixture root))))
+    (values (parse-integer (run-c assigned)) (sheaf:run-lowered assigned))))
+
+(test prelude-programs-match-the-interpreter-in-c
+  (is (= 116 (c-result "arrays")))
+  (is (= 29 (c-result "cells")))
+  (is (= 53 (c-result "vectors"))))
+
+(test growables-match-the-interpreter-in-c
+  (dolist (root '("MAIN-TWO" "MAIN-LIST" "MAIN-RELAY" "MAIN-EITHER" "MAIN-LISTED" "MAIN-DOWN"
+                  "MAIN-PICKED" "MAIN-CELL" "MAIN-TABLE"))
+    (multiple-value-bind (compiled interpreted) (c-result-from "growables" root)
+      (is (= interpreted compiled) "~a" root))))
+
+(test an-index-outside-an-array-aborts-in-c
+  (multiple-value-bind (output errors code) (run-c (assigned "out-of-bounds"))
+    (declare (ignore output))
+    (is (/= 0 code))
+    (is (search "outside" errors))))
+
+(test a-growable-under-another-value-aborts-in-c
+  (multiple-value-bind (output errors code) (run-c (with-shared-stack "arrays" "TWO-ARRAYS"))
+    (declare (ignore output))
+    (is (/= 0 code))
+    (is (search "grew under" errors))))
+
+(test hash-tables-and-banks-are-not-emitted
+  (is (search "sheaf/32" (error-text (lambda () (sheaf:emit-c (assigned "hashtables"))))))
+  (is (search "sheaf/33" (error-text (lambda ()
+                                       (sheaf:emit-c (sheaf:assign-stacks (lowered-from "growables" "MAIN-VECTORS"))))))))
 
 (test clones-are-named-in-comments
   (is (search "// PAIR<" (sheaf:emit-c (assigned "stacks")))))

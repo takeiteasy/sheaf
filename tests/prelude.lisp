@@ -215,8 +215,3 @@ pushed to that function's pool."
   (is (integerp (sheaf:ir-def-pool (first (clones "arrays" "TWO-ARRAYS")))))
   (is (search "grew under"
               (error-text (lambda () (sheaf:run-lowered (with-shared-stack "arrays" "TWO-ARRAYS")))))))
-
-(test arrays-are-not-emitted
-  (let ((message (handler-case (progn (sheaf:emit-c (assigned "arrays")) "")
-                   (error (condition) (princ-to-string condition)))))
-    (is (search "sheaf/27" message))))

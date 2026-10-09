@@ -69,8 +69,9 @@ stack when it grows.
 
 ## Limitations
 
-- The C emitter rejects the prelude's types and operations, and `Cell`:
-  [#27](https://todo.sr.ht/~takeiteasy/sheaf/27).
+- The C emitter rejects `HashTable`:
+  [#32](https://todo.sr.ht/~takeiteasy/sheaf/32), and a recursive cycle that builds a
+  growable value at every level: [#33](https://todo.sr.ht/~takeiteasy/sheaf/33).
 - A `HashTable` key other than `UFix` is a lowering error:
   [#23](https://todo.sr.ht/~takeiteasy/sheaf/23).
 - Elements other than `UFix` and the data types built from it have no
@@ -78,8 +79,6 @@ stack when it grows.
 - `Vector` and `HashTable` functions other than the ones above, such as
   `entries`, `keys` and `extend!`, hold raw Lisp:
   [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
-- A recursive cycle that builds a `GrowArray`, `Stack`, `Vector` or `HashTable`
-  at every level is an error: [#31](https://todo.sr.ht/~takeiteasy/sheaf/31).
 
 [^len]: A `FixedArray` length is read from the type after monomorphization,
     through a table `define-length` fills. The `Extent` class that

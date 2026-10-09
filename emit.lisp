@@ -6,12 +6,13 @@
 (defvar *out*)
 (defvar *indent* 0)
 (defvar *c-types*)
+(defvar *c-arrays*)
 (defvar *c-names*)
 (defvar *c-counter*)
 (defvar *emit-def* nil "The def being emitted, for errors.")
 (defvar *self*)
 (defvar *params*)
-(defvar *pool*)
+(defvar *releases* '() "The stack tops to restore on return, each a stack index and the C variable holding its mark.")
 (defvar *result-c-type*)
 (defvar *tail-used*)
 
@@ -58,20 +59,57 @@
   (format nil "T~d" (or (gethash type *c-types*)
                         (setf (gethash type *c-types*) (hash-table-count *c-types*)))))
 
+(defun storage-layout (type)
+  "How TYPE is laid out in C: `:array`, `:grow`, `:slice`, `:pointer`, or nil."
+  (let ((name (ir-type-name type)))
+    (cond ((member name '(sheaf/prelude:fixedarray sheaf/prelude:array)) :array)
+          ((member name '(sheaf/prelude:growarray sheaf/prelude:stack coalton/vector:vector)) :grow)
+          ((eq name 'sheaf/prelude:slice) :slice)
+          ((member name '(sheaf/prelude:ref coalton/cell:cell)) :pointer))))
+
+(defun element-type (type)
+  (first (last (ir-type-args type))))
+
+(defun array-struct (layout type)
+  "The name of the C struct for LAYOUT, `:array`, `:grow` or `:slice`, of elements like TYPE's."
+  (let* ((key (list layout (c-type (element-type type))))
+         (id (or (gethash key *c-arrays*)
+                 (setf (gethash key *c-arrays*) (hash-table-count *c-arrays*)))))
+    (format nil "~a~d" (ecase layout (:array "A") (:grow "G") (:slice "S")) id)))
+
 (defun c-type (type)
   (ecase (ir-type-kind type)
     (:scalar (if (ufix-type-p type)
                  "uint64_t"
                  (emit-error "the type ~a: https://todo.sr.ht/~~takeiteasy/sheaf/23" (type-text type))))
-    ((:storage :view) (emit-error "the array or reference type ~a: https://todo.sr.ht/~~takeiteasy/sheaf/27"
-                                  (type-text type)))
+    ((:storage :view)
+     (let ((layout (storage-layout type)))
+       (case layout
+         ((:array :grow) (format nil "struct ~a *" (array-struct layout type)))
+         (:slice (format nil "struct ~a" (array-struct layout type)))
+         (:pointer (format nil "~a *" (c-type (element-type type))))
+         (t (emit-error "the type ~a: https://todo.sr.ht/~~takeiteasy/sheaf/32" (type-text type))))))
     (:data (format nil "struct ~a~:[~; *~]" (struct-name type) (pooled-p type)))))
+
+(defun emit-forward-declarations ()
+  (maphash (lambda (type id) (declare (ignore type)) (line "struct T~d;" id)) *c-types*)
+  (maphash (lambda (key id)
+             (line "struct ~a~d;" (ecase (first key) (:array "A") (:grow "G") (:slice "S")) id))
+           *c-arrays*))
+
+(defun emit-array-definitions (layouts)
+  "The C structs of the array layouts LAYOUTS, in the order they were first used."
+  (let ((entries '()))
+    (maphash (lambda (key id) (when (member (first key) layouts) (push (cons id key) entries))) *c-arrays*)
+    (loop :for (id layout element) :in (sort entries #'< :key #'car) :do
+      (ecase layout
+        (:slice (line "struct S~d { ~a *e; uint64_t length; };" id element))
+        (:array (line "struct A~d { uint64_t length; ~a e[]; };" id element))
+        (:grow (line "struct G~d { sheaf_stack *stack; uint64_t length; ~a e[]; };" id element))))))
 
 (defun emit-type-definitions (lowered)
   (let ((done (make-hash-table :test 'eq))
         (types (loop :for type :being :the :hash-keys :of (lowered-types lowered) :collect type)))
-    (dolist (type types)
-      (line "struct ~a;" (struct-name type)))
     (labels ((define (type)
                (unless (gethash type done)
                  (setf (gethash type done) t)
@@ -120,9 +158,143 @@
 (defun member-access (access type member)
   (format nil (if (pooled-p type) "(~a)->~a" "(~a).~a") access member))
 
+(defun tagged-literal (type tag args)
+  (format nil "(~a){ .tag = ~d~@[, .u.c~d = { ~{~a~^, ~} }~] }" (c-type type) tag (and args tag) args))
+
+(defun constructor-literal (type name &rest args)
+  (tagged-literal type (ir-constructor-tag (named-constructor *lowered* type name)) args))
+
+(defun element-access (type expression)
+  "The C expressions for the elements and the length of EXPRESSION, a value of
+the array, growable or slice TYPE."
+  (ecase (storage-layout type)
+    ((:array :grow) (values (format nil "(~a)->e" expression) (format nil "(~a)->length" expression)))
+    (:slice (values (format nil "(~a).e" expression) (format nil "(~a).length" expression)))))
+
+(defun push-array (node length)
+  "Write the statements that push the array NODE builds with LENGTH elements,
+and return its C variable."
+  (let* ((type (ir-node-type node))
+         (array (fresh-c-name (make-symbol "ARRAY")))
+         (struct (format nil "struct ~a" (array-struct :array type))))
+    (line "~a ~a = sheaf_push(&sheaf_stacks[~d], offsetof(~a, e) + ~a * sizeof(~a), _Alignof(~a));"
+          (c-type type) array (ir-prim-stack node) struct length (c-type (element-type type)) struct)
+    (line "~a->length = ~a;" array length)
+    array))
+
+(defun prelude-expr (node env)
+  "A C expression for the prelude operation NODE, after writing any statements it needs."
+  (let* ((op (ir-prim-op node))
+         (args (mapcar (lambda (arg) (atom-expr arg env)) (ir-prim-args node)))
+         (arg-types (mapcar #'ir-node-type (ir-prim-args node)))
+         (type (ir-node-type node)))
+    (labels ((unit () (constructor-literal type "UNIT"))
+             (element-c (storage-type) (c-type (element-type storage-type)))
+             (stack ()
+               (ir-prim-stack node))
+             (new-array (length value)
+               (let ((array (push-array node length))
+                     (index (fresh-c-name (make-symbol "I")))
+                     (fill (fresh-c-name (make-symbol "FILL"))))
+                 (line "~a ~a = ~a;" (element-c type) fill value)
+                 (line "for (uint64_t ~a = 0; ~a < ~a->length; ~a++) ~a->e[~a] = ~a;"
+                       index index array index array index fill)
+                 array))
+             (new-growable ()
+               (let ((growable (fresh-c-name (make-symbol "GROW"))))
+                 (line "~a ~a = sheaf_push(&sheaf_stacks[~d], offsetof(struct ~a, e), _Alignof(struct ~a));"
+                       (c-type type) growable (stack) (array-struct :grow type) (array-struct :grow type))
+                 (line "~a->stack = &sheaf_stacks[~d];" growable (stack))
+                 (line "~a->length = 0;" growable)
+                 growable))
+             (push-element (growable value storage-type)
+               (let ((index (fresh-c-name (make-symbol "INDEX")))
+                     (slot (fresh-c-name (make-symbol "SLOT")))
+                     (elem (element-c storage-type)))
+                 (line "uint64_t ~a = (~a)->length;" index growable)
+                 (line "~a *~a = sheaf_grow((~a)->stack, (~a)->e + ~a, sizeof(~a));"
+                       elem slot growable growable index elem)
+                 (line "*~a = ~a;" slot value)
+                 (line "(~a)->length = ~a + 1;" growable index)
+                 index))
+             (pop-element (growable)
+               (let ((result (fresh-c-name (make-symbol "POPPED"))))
+                 (line "~a ~a;" (c-type type) result)
+                 (line "if ((~a)->length == 0) {" growable)
+                 (indented (line "~a = ~a;" result (constructor-literal type "NONE")))
+                 (line "} else {")
+                 (indented
+                   (line "(~a)->length--;" growable)
+                   (line "sheaf_shrink((~a)->stack, (~a)->e + (~a)->length + 1, (~a)->e + (~a)->length);"
+                         growable growable growable growable growable)
+                   (line "~a = ~a;" result
+                         (constructor-literal type "SOME" (format nil "(~a)->e[(~a)->length]" growable growable))))
+                 (line "}")
+                 result))
+             (checked (array-type array index)
+               (multiple-value-bind (data length) (element-access array-type array)
+                 (format nil "~a[sheaf_index(~a, ~a)]" data index length))))
+      (destructuring-bind (&optional a b c) args
+        (destructuring-bind (&optional type-a &rest others) arg-types
+          (declare (ignore others))
+          (ecase op
+            (:fixed-new (new-array (format nil "UINT64_C(~d)" (fixed-length type)) a))
+            (:array-new
+             (let ((length (fresh-c-name (make-symbol "LENGTH"))))
+               (line "uint64_t ~a = ~a;" length a)
+               (new-array length b)))
+            (:cell-new
+             (let ((cell (fresh-c-name (make-symbol "CELL"))))
+               (line "~a ~a = sheaf_push(&sheaf_stacks[~d], sizeof(~a), _Alignof(~a));"
+                     (c-type type) cell (stack) (element-c type) (element-c type))
+               (line "*~a = ~a;" cell a)
+               cell))
+            ((:grow-new :stack-new :vector-new) (new-growable))
+            ((:grow-push :stack-push)
+             (push-element a b type-a)
+             (unit))
+            (:vector-push (push-element b a (second arg-types)))
+            ((:stack-pop :vector-pop) (pop-element a))
+            (:vector-index
+             (multiple-value-bind (data length) (element-access (second arg-types) b)
+               (format nil "(~a < ~a ? ~a : ~a)" a length
+                       (constructor-literal type "SOME" (format nil "~a[~a]" data a))
+                       (constructor-literal type "NONE"))))
+            (:vector-index-unsafe (checked (second arg-types) b a))
+            (:vector-set
+             (line "~a = ~a;" (checked (third arg-types) c a) b)
+             (unit))
+            (:vector-length (nth-value 1 (element-access type-a a)))
+            (:elements-length (nth-value 1 (element-access type-a a)))
+            (:elements-index (checked type-a a b))
+            (:elements-set
+             (line "~a = ~a;" (checked type-a a b) c)
+             (unit))
+            (:elements-ref (format nil "&~a" (checked type-a a b)))
+            (:elements-slice
+             (multiple-value-bind (data length) (element-access type-a a)
+               (line "sheaf_range(~a, ~a, ~a);" b c length)
+               (format nil "(~a){ ~a + ~a, ~a - ~a }" (c-type type) data b c b)))
+            (:ref-get (format nil "(*~a)" a))
+            (:ref-set
+             (line "*~a = ~a;" a b)
+             (unit))
+            (:cell-read (format nil "(*~a)" a))
+            (:cell-write
+             (line "*~a = ~a;" a b)
+             b)
+            (:cell-swap
+             (let ((old (fresh-c-name (make-symbol "OLD"))))
+               (line "~a ~a = *~a;" (element-c type-a) old a)
+               (line "*~a = ~a;" a b)
+               old))
+            ((:hashtable-new :hashtable-with-capacity :hashtable-get :hashtable-set :hashtable-remove
+              :hashtable-count)
+             (emit-error "the hash table operation ~(~a~): https://todo.sr.ht/~~takeiteasy/sheaf/32" op))))))))
+
 (defun prim-expr (node env)
   (when (prelude-op-p (ir-prim-op node))
-    (emit-error "the array operation ~(~a~): https://todo.sr.ht/~~takeiteasy/sheaf/27" (ir-prim-op node)))
+    (return-from prim-expr (prelude-expr node env)))
   (destructuring-bind (&optional a b) (mapcar (lambda (arg) (atom-expr arg env)) (ir-prim-args node))
     (let ((type (ir-node-type node)))
       (flet ((tag (name) (ir-constructor-tag (named-constructor *lowered* type name)))
@@ -155,8 +327,7 @@
                 :for i :from 0
                 :do (line "~a->u.c~d.f~d = ~a;" cell tag i arg))
           cell)
-        (format nil "(~a){ .tag = ~d~@[, .u.c~d = { ~{~a~^, ~} }~] }"
-                (c-type type) tag (and args tag) args))))
+        (tagged-literal type tag args))))
 
 (defun call-expr (node env)
   (let ((call (format nil "~a(~{~a~^, ~})" (c-name (ir-call-function node))
@@ -182,11 +353,15 @@
 
 ;;; Statements
 
+(defun emit-releases (releases)
+  (loop :for (stack . mark) :in releases
+        :do (line "sheaf_stacks[~d].top = ~a;" stack mark)))
+
 (defun emit-return (expression)
-  (if *pool*
+  (if *releases*
       (let ((result (fresh-c-name (make-symbol "RESULT"))))
         (line "~a ~a = ~a;" *result-c-type* result expression)
-        (line "sheaf_stacks[~d].top = pool_mark;" *pool*)
+        (emit-releases *releases*)
         (line "return ~a;" result))
       (line "return ~a;" expression)))
 
@@ -194,7 +369,7 @@
   (and (typep node 'ir-call)
        (eq (ir-call-function node) *self*)
        (null (ir-call-region node))
-       (null *pool*)))
+       (null *releases*)))
 
 (defun emit-tail-call (node env)
   (setf *tail-used* t)
@@ -264,10 +439,19 @@ symbol, a type and the expression for its value."
   "Write the statements that compute NODE into TARGET, a C variable or `:return`."
   (etypecase node
     (ir-let
-     (let ((name (fresh-c-name (ir-let-name node))))
+     (when (ir-let-bank node)
+       (emit-error "a bank: https://todo.sr.ht/~~takeiteasy/sheaf/33"))
+     (let ((name (fresh-c-name (ir-let-name node)))
+           (owned (loop :for stack :in (ir-let-stacks node)
+                        :collect (cons stack (fresh-c-name (make-symbol "MARK"))))))
+       (loop :for (stack . mark) :in owned
+             :do (line "char *~a = sheaf_stacks[~d].top;" mark stack))
        (line "~a ~a SHEAF_UNUSED;" (c-type (ir-node-type (ir-let-value node))) name)
        (emit-node (ir-let-value node) name env)
-       (emit-node (ir-let-body node) target (acons (ir-let-name node) name env))))
+       (let ((*releases* (append owned *releases*)))
+         (emit-node (ir-let-body node) target (acons (ir-let-name node) name env)))
+       (unless (eq target :return)
+         (emit-releases owned))))
     (ir-match (emit-match node target env))
     ((or ir-atom ir-prim ir-construct ir-call ir-foreign)
      (cond ((and (eq target :return) (self-tail-call-p node))
@@ -288,7 +472,7 @@ symbol, a type and the expression for its value."
          (*self* (ir-def-name def))
          (*tail-used* nil)
          (*result-c-type* (c-type (ir-def-result def)))
-         (*pool* (ir-def-pool def))
+         (*releases* (and (ir-def-pool def) (list (cons (ir-def-pool def) "pool_mark"))))
          (name (c-name (ir-def-name def)))
          (params (loop :for (symbol . type) :in (ir-def-params def)
                        :collect (cons (fresh-c-name symbol) (c-type type))))
@@ -299,12 +483,11 @@ symbol, a type and the expression for its value."
          (value-p (eq (ir-def-kind def) :value))
          (body (with-output-to-string (*out*)
                  (let ((*indent* 1))
-                   (when *pool*
-                     (line "char *pool_mark = sheaf_stacks[~d].top;" *pool*))
+                   (when *releases*
+                     (line "char *pool_mark = sheaf_stacks[~d].top;" (ir-def-pool def)))
                    (cond (value-p
                           (emit-node (ir-def-body def) "value" env)
-                          (when *pool*
-                            (line "sheaf_stacks[~d].top = pool_mark;" *pool*))
+                          (emit-releases *releases*)
                           (line "ready = 1;")
                           (line "return value;"))
                          (t (emit-node (ir-def-body def) :return env)))))))
@@ -346,6 +529,7 @@ runtime/sheaf.h. Writes it to STREAM, or returns it as a string without one."
             (*indent* 0)
             (*lowered* assigned)
             (*c-types* (make-hash-table :test 'eq))
+            (*c-arrays* (make-hash-table :test 'equal))
             (*c-names* (make-hash-table :test 'eq))
             (*c-counter* 0)
             (*emit-def* nil))
@@ -353,25 +537,39 @@ runtime/sheaf.h. Writes it to STREAM, or returns it as a string without one."
                    (declare (ignore def))
                    (setf (gethash name *c-names*) (fresh-c-name name)))
                  (lowered-defs assigned))
-        (line "// Generated by Sheaf.")
-        (line "#include \"sheaf.h\"")
-        (terpri *out*)
-        (emit-type-definitions assigned)
-        (terpri *out*)
-        (line "static sheaf_stack sheaf_stacks[~d];" (max 1 (lowered-stack-count assigned)))
-        (terpri *out*)
-        (maphash (lambda (name def)
-                   (let ((*emit-def* def))
-                     (line "~a;" (signature def (c-name name)
-                                            (loop :for (nil . type) :in (ir-def-params def)
-                                                  :collect (c-type type))))))
-                 (lowered-defs assigned))
-        (terpri *out*)
-        (maphash (lambda (name def)
-                   (declare (ignore name))
-                   (emit-def def))
-                 (lowered-defs assigned))
-        (emit-main assigned))
+        (maphash (lambda (type definition)
+                   (declare (ignore definition))
+                   (struct-name type))
+                 (lowered-types assigned))
+        (let* ((body (with-output-to-string (*out*)
+                       (line "static sheaf_stack sheaf_stacks[~d];" (max 1 (lowered-stack-count assigned)))
+                       (terpri *out*)
+                       (maphash (lambda (name def)
+                                  (let ((*emit-def* def))
+                                    (when (ir-def-bank def)
+                                      (emit-error "a bank: https://todo.sr.ht/~~takeiteasy/sheaf/33"))
+                                    (line "~a;" (signature def (c-name name)
+                                                           (loop :for (nil . type) :in (ir-def-params def)
+                                                                 :collect (c-type type))))))
+                                (lowered-defs assigned))
+                       (terpri *out*)
+                       (maphash (lambda (name def)
+                                  (declare (ignore name))
+                                  (emit-def def))
+                                (lowered-defs assigned))
+                       (emit-main assigned)))
+               (types (with-output-to-string (*out*)
+                        (emit-type-definitions assigned))))
+          (line "// Generated by Sheaf.")
+          (line "#include \"sheaf.h\"")
+          (terpri *out*)
+          (emit-forward-declarations)
+          (terpri *out*)
+          (emit-array-definitions '(:slice))
+          (write-string types *out*)
+          (emit-array-definitions '(:array :grow))
+          (terpri *out*)
+          (write-string body *out*)))
       (with-output-to-string (stream)
         (emit-c assigned stream))))
 

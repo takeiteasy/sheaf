@@ -14,7 +14,7 @@ What runs today, checked by `make test` ([TESTING.md](TESTING.md)).
 | Prelude | Arrays, slices, references, `Cell`, `Vector` and `Hashtable` that lower, run and get stacks; `fixed:define-length` declares fixed lengths ([PRELUDE.md](PRELUDE.md)) |
 | Root checking | Reject a store of an array, slice or reference into storage its root does not outlive, naming both places ([ROOTS.md](ROOTS.md)) |
 | Stack assignment | Assign data stacks to a lowered program and run it on simulated stacks that check each stack's owner |
-| C emitter | Emit an assigned program as one C file that runs on `runtime/sheaf.h`; the fixtures' results match the interpreter |
+| C emitter | Emit an assigned program as one C file that runs on `runtime/sheaf.h`; the fixtures' results match the interpreter, including arrays, slices, references, `Cell`, `GrowArray`, `Stack` and `Vector` |
 | SBCL | Every program runs through Coalton's own backend |
 
 ## Does not run yet

@@ -120,7 +120,7 @@ freed.
 
 - A bank is only simulated: C needs stacks handed out at run time, and a
   47-bit address space holds about 30,000 of its 4 GiB stacks:
-  [#27](https://todo.sr.ht/~takeiteasy/sheaf/27).
+  [#33](https://todo.sr.ht/~takeiteasy/sheaf/33).
 - A cycle keeps what it allocates until the call into it returns:
   [#11](https://todo.sr.ht/~takeiteasy/sheaf/11).
 - A growable local live across a call back into its own cycle is an error.
