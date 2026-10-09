@@ -57,7 +57,7 @@ The excerpt omits `SHEAF_UNUSED` attributes and temporaries.
 | `GrowArray`, `Stack`, `Vector` | `struct Gn *`: the stack it grows on, a `length` and the elements |
 | `Slice` | `struct Sn` by value: a pointer to the first element and a `length` |
 | `Ref`, `Cell` | A pointer to the element |
-| `HashTable` | An emit error: [#32](https://todo.sr.ht/~takeiteasy/sheaf/32) |
+| `HashTable` | `struct Hn *`: the stack it grows on, a `count`, a `capacity` and the slots[^table] |
 | Any other scalar | An emit error |
 
 ## Stacks
@@ -107,7 +107,9 @@ A slice past either limit prints `bank space exhausted` or `a bank slice exhaust
   [#13](https://todo.sr.ht/~takeiteasy/sheaf/13).
 - Raw Lisp is an error: [#16](https://todo.sr.ht/~takeiteasy/sheaf/16),
   [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
-- `HashTable`: [#32](https://todo.sr.ht/~takeiteasy/sheaf/32).
+- `hashtable:count` returns an `Integer`, which is an emit error:
+  [#23](https://todo.sr.ht/~takeiteasy/sheaf/23). So is a `with-capacity` or
+  `make` whose capacity is not a literal.
 - Only `UFix` and the data types built from it are emitted:
   [#23](https://todo.sr.ht/~takeiteasy/sheaf/23).
 - `UFix` arithmetic wraps at 64 bits: [#9](https://todo.sr.ht/~takeiteasy/sheaf/9).
@@ -120,5 +122,12 @@ A slice past either limit prints `bank space exhausted` or `a bank slice exhaust
 [^links]: A pointer into a data stack stays valid because nothing on a stack
     moves. [MEMORY.md](MEMORY.md) describes the smaller relative links the
     pointers will become.
+[^table]: Open addressing with linear probing over `UFix` keys. A slot is a key,
+    a used flag and the value. The capacity is a power of two, at least 8, and
+    doubles when the table is three quarters full: the larger slots are built
+    above the old ones, then moved down so the table stays on top of its stack.
+    A removal shifts the later entries of its probe run back, leaving no
+    tombstones. A write when another value is above the table prints a message
+    and exits, like any growable value.
 [^madvise]: `madvise` with `MADV_FREE` on macOS and `MADV_DONTNEED` elsewhere,
     on the whole pages between the kept bytes and the slice's top.

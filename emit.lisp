@@ -60,10 +60,11 @@
                         (setf (gethash type *c-types*) (hash-table-count *c-types*)))))
 
 (defun storage-layout (type)
-  "How TYPE is laid out in C: `:array`, `:grow`, `:slice`, `:pointer`, or nil."
+  "How TYPE is laid out in C: `:array`, `:grow`, `:table`, `:slice`, `:pointer`, or nil."
   (let ((name (ir-type-name type)))
     (cond ((member name '(sheaf/prelude:fixedarray sheaf/prelude:array)) :array)
           ((member name '(sheaf/prelude:growarray sheaf/prelude:stack coalton/vector:vector)) :grow)
+          ((eq name 'coalton/hashtable:hashtable) :table)
           ((eq name 'sheaf/prelude:slice) :slice)
           ((member name '(sheaf/prelude:ref coalton/cell:cell)) :pointer))))
 
@@ -71,11 +72,11 @@
   (first (last (ir-type-args type))))
 
 (defun array-struct (layout type)
-  "The name of the C struct for LAYOUT, `:array`, `:grow` or `:slice`, of elements like TYPE's."
+  "The name of the C struct for LAYOUT, `:array`, `:grow`, `:table` or `:slice`, of elements like TYPE's."
   (let* ((key (list layout (c-type (element-type type))))
          (id (or (gethash key *c-arrays*)
                  (setf (gethash key *c-arrays*) (hash-table-count *c-arrays*)))))
-    (format nil "~a~d" (ecase layout (:array "A") (:grow "G") (:slice "S")) id)))
+    (format nil "~a~d" (ecase layout (:array "A") (:grow "G") (:table "H") (:slice "S")) id)))
 
 (defun c-type (type)
   (ecase (ir-type-kind type)
@@ -85,16 +86,15 @@
     ((:storage :view)
      (let ((layout (storage-layout type)))
        (case layout
-         ((:array :grow) (format nil "struct ~a *" (array-struct layout type)))
+         ((:array :grow :table) (format nil "struct ~a *" (array-struct layout type)))
          (:slice (format nil "struct ~a" (array-struct layout type)))
-         (:pointer (format nil "~a *" (c-type (element-type type))))
-         (t (emit-error "the type ~a: https://todo.sr.ht/~~takeiteasy/sheaf/32" (type-text type))))))
+         (:pointer (format nil "~a *" (c-type (element-type type)))))))
     (:data (format nil "struct ~a~:[~; *~]" (struct-name type) (pooled-p type)))))
 
 (defun emit-forward-declarations ()
   (maphash (lambda (type id) (declare (ignore type)) (line "struct T~d;" id)) *c-types*)
   (maphash (lambda (key id)
-             (line "struct ~a~d;" (ecase (first key) (:array "A") (:grow "G") (:slice "S")) id))
+             (line "struct ~a~d;" (ecase (first key) (:array "A") (:grow "G") (:table "H") (:slice "S")) id))
            *c-arrays*))
 
 (defun emit-array-definitions (layouts)
@@ -105,7 +105,8 @@
       (ecase layout
         (:slice (line "struct S~d { ~a *e; uint64_t length; };" id element))
         (:array (line "struct A~d { uint64_t length; ~a e[]; };" id element))
-        (:grow (line "struct G~d { sheaf_stack *stack; uint64_t length; ~a e[]; };" id element))))))
+        (:grow (line "struct G~d { sheaf_stack *stack; uint64_t length; ~a e[]; };" id element))
+        (:table (line "struct H~d { sheaf_table table; struct { uint64_t key, used; ~a value; } e[]; };" id element))))))
 
 (defun emit-type-definitions (lowered)
   (let ((done (make-hash-table :test 'eq))
@@ -185,7 +186,8 @@ and return its C variable."
 (defun prelude-expr (node env)
   "A C expression for the prelude operation NODE, after writing any statements it needs."
   (let* ((op (ir-prim-op node))
-         (args (mapcar (lambda (arg) (atom-expr arg env)) (ir-prim-args node)))
+         (args (unless (eq op :hashtable-with-capacity)
+                 (mapcar (lambda (arg) (atom-expr arg env)) (ir-prim-args node))))
          (arg-types (mapcar #'ir-node-type (ir-prim-args node)))
          (type (ir-node-type node)))
     (labels ((unit () (constructor-literal type "UNIT"))
@@ -200,13 +202,25 @@ and return its C variable."
                  (line "for (uint64_t ~a = 0; ~a < ~a->length; ~a++) ~a->e[~a] = ~a;"
                        index index array index array index fill)
                  array))
+             (growable-stack ()
+               (if (ir-prim-bank node)
+                   (let ((slice (fresh-c-name (make-symbol "SLICE"))))
+                     (line "sheaf_stack *~a = sheaf_bank_stack(&sheaf_banks[~d]);" slice (ir-prim-bank node))
+                     slice)
+                   (format nil "&sheaf_stacks[~d]" (stack))))
+             (new-table (hint)
+               (let ((table (fresh-c-name (make-symbol "TABLE")))
+                     (struct (format nil "struct ~a" (array-struct :table type))))
+                 (line "~a ~a = (~a)sheaf_table_new(~a, offsetof(~a, e), sizeof(((~a *)0)->e[0]), _Alignof(~a), ~a);"
+                       (c-type type) table (c-type type) (growable-stack) struct struct struct hint)
+                 table))
+             (table-slots (table)
+               (format nil "(char *)(~a)->e" table))
+             (table-slot (table)
+               (format nil "sizeof((~a)->e[0])" table))
              (new-growable ()
                (let ((growable (fresh-c-name (make-symbol "GROW")))
-                     (on (if (ir-prim-bank node)
-                             (let ((slice (fresh-c-name (make-symbol "SLICE"))))
-                               (line "sheaf_stack *~a = sheaf_bank_stack(&sheaf_banks[~d]);" slice (ir-prim-bank node))
-                               slice)
-                             (format nil "&sheaf_stacks[~d]" (stack)))))
+                     (on (growable-stack)))
                  (line "~a ~a = sheaf_push(~a, offsetof(struct ~a, e), _Alignof(struct ~a));"
                        (c-type type) growable on (array-struct :grow type) (array-struct :grow type))
                  (line "~a->stack = ~a;" growable on)
@@ -293,9 +307,29 @@ and return its C variable."
                (line "~a ~a = *~a;" (element-c type-a) old a)
                (line "*~a = ~a;" a b)
                old))
-            ((:hashtable-new :hashtable-with-capacity :hashtable-get :hashtable-set :hashtable-remove
-              :hashtable-count)
-             (emit-error "the hash table operation ~(~a~): https://todo.sr.ht/~~takeiteasy/sheaf/32" op))))))))
+            (:hashtable-new (new-table 0))
+            (:hashtable-with-capacity
+             (let ((hint (first (ir-prim-args node))))
+               (unless (and (typep hint 'ir-literal) (integerp (ir-literal-value hint)) (<= 0 (ir-literal-value hint)))
+                 (emit-error "a hash table capacity that is not a literal: https://todo.sr.ht/~~takeiteasy/sheaf/23"))
+               (new-table (format nil "UINT64_C(~d)" (ir-literal-value hint)))))
+            (:hashtable-get
+             (let ((found (fresh-c-name (make-symbol "FOUND"))))
+               (line "uint64_t ~a = sheaf_table_find(&(~a)->table, ~a, ~a, ~a);"
+                     found a (table-slots a) (table-slot a) b)
+               (format nil "(~a == (~a)->table.capacity ? ~a : ~a)" found a
+                       (constructor-literal type "NONE")
+                       (constructor-literal type "SOME" (format nil "(~a)->e[~a].value" a found)))))
+            (:hashtable-set
+             (let ((slot (fresh-c-name (make-symbol "SLOT"))))
+               (line "uint64_t ~a = sheaf_table_insert(&(~a)->table, ~a, ~a, ~a);"
+                     slot a (table-slots a) (table-slot a) b)
+               (line "(~a)->e[~a].value = ~a;" a slot c)
+               (unit)))
+            (:hashtable-remove
+             (line "sheaf_table_remove(&(~a)->table, ~a, ~a, ~a);" a (table-slots a) (table-slot a) b)
+             (unit))
+            (:hashtable-count (format nil "(~a)->table.count" a))))))))
 
 (defun prim-expr (node env)
   (when (prelude-op-p (ir-prim-op node))
@@ -575,7 +609,7 @@ runtime/sheaf.h. Writes it to STREAM, or returns it as a string without one."
           (terpri *out*)
           (emit-array-definitions '(:slice))
           (write-string types *out*)
-          (emit-array-definitions '(:array :grow))
+          (emit-array-definitions '(:array :grow :table))
           (terpri *out*)
           (write-string body *out*)))
       (with-output-to-string (stream)

@@ -69,8 +69,6 @@ stack when it grows.
 
 ## Limitations
 
-- The C emitter rejects `HashTable`:
-  [#32](https://todo.sr.ht/~takeiteasy/sheaf/32).
 - A `HashTable` key other than `UFix` is a lowering error:
   [#23](https://todo.sr.ht/~takeiteasy/sheaf/23).
 - Elements other than `UFix` and the data types built from it have no

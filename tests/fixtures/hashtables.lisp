@@ -51,6 +51,62 @@
       (hashtable:set! h True 1)
       0))
 
+  (declare fill-to (UFix * (hashtable:HashTable UFix UFix) -> Unit))
+  (define (fill-to n h)
+    (if (== n 0)
+        Unit
+        (progn
+          (hashtable:set! h (- n 1) n)
+          (fill-to (- n 1) h))))
+
+  (declare drop-evens (UFix * (hashtable:HashTable UFix UFix) -> Unit))
+  (define (drop-evens n h)
+    (if (== n 0)
+        Unit
+        (progn
+          (hashtable:remove! h (* 2 (- n 1)))
+          (drop-evens (- n 1) h))))
+
+  (declare sum-from (UFix * UFix * (hashtable:HashTable UFix UFix) -> UFix))
+  (define (sum-from n acc h)
+    (if (== n 0)
+        acc
+        (sum-from (- n 1)
+                  (+ acc (match (hashtable:get h (- n 1))
+                           ((Some x) x)
+                           ((None) 0)))
+                  h)))
+
+  (declare main-many (Void -> UFix))
+  (define (main-many)
+    (let ((h (the (hashtable:HashTable UFix UFix) (hashtable:new))))
+      (fill-to 100 h)
+      (drop-evens 50 h)
+      (sum-from 100 0 h)))
+
+  (declare tables-down (UFix -> (List (hashtable:HashTable UFix UFix))))
+  (define (tables-down n)
+    (let ((h (the (hashtable:HashTable UFix UFix) (hashtable:new))))
+      (hashtable:set! h n n)
+      (if (== n 0)
+          Nil
+          (Cons h (tables-down (- n 1))))))
+
+  (declare table-total (List (hashtable:HashTable UFix UFix) -> UFix))
+  (define (table-total tables)
+    (match tables
+      ((Nil) 0)
+      ((Cons h rest)
+       (hashtable:set! h 100 1)
+       (+ (match (hashtable:get h 100)
+            ((Some x) x)
+            ((None) 0))
+          (table-total rest)))))
+
+  (declare main-tables (Void -> UFix))
+  (define (main-tables)
+    (table-total (tables-down 3)))
+
   (declare main (Void -> UFix))
   (define (main)
     (let ((h (filled 3)))

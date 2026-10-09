@@ -78,8 +78,14 @@ and exit code."
     (is (/= 0 code))
     (is (search "grew under" errors))))
 
-(test hash-tables-are-not-emitted
-  (is (search "sheaf/32" (error-text (lambda () (sheaf:emit-c (assigned "hashtables")))))))
+(test hash-tables-match-the-interpreter-in-c
+  (is (= (sheaf:run-lowered (assigned "hashtables")) (c-result "hashtables")))
+  (dolist (root '("MAIN-MANY" "MAIN-TABLES"))
+    (multiple-value-bind (compiled interpreted) (c-result-from "hashtables" root)
+      (is (= interpreted compiled) "~a" root))))
+
+(test a-hash-table-count-is-not-emitted-until-integers-are
+  (is (search "sheaf/23" (error-text (lambda () (sheaf:emit-c (sheaf:assign-stacks (lowered-from "hashtables" "COUNTED"))))))))
 
 (defparameter *small-banks* '("-DSHEAF_SLICE_SIZE=65536" "-DSHEAF_BANK_SPACE=524288")
   "Eight slices of bank space.")

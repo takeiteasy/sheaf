@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -183,6 +184,100 @@ static SHEAF_UNUSED void sheaf_bank_release(sheaf_bank *bank, sheaf_slice *mark)
         slice->next = sheaf_free_slices;
         sheaf_free_slices = slice;
     }
+}
+
+/* A hash table of UFix keys. Its slots follow it on its stack, each a key, a used flag and a value. */
+typedef struct {
+    sheaf_stack *stack;
+    uint64_t count, capacity;
+} sheaf_table;
+
+#define SHEAF_TABLE_MIN 8
+
+static SHEAF_UNUSED uint64_t sheaf_table_hash(uint64_t key) {
+    key ^= key >> 30;
+    key *= UINT64_C(0xbf58476d1ce4e5b9);
+    key ^= key >> 27;
+    key *= UINT64_C(0x94d049bb133111eb);
+    return key ^ (key >> 31);
+}
+
+#define SHEAF_SLOT(slots, slot, i) ((uint64_t *)((slots) + (i) * (slot)))
+
+/* The slot of KEY in a table of CAPACITY slots, or the empty slot where it belongs. */
+static SHEAF_UNUSED uint64_t sheaf_table_probe(char *slots, size_t slot, uint64_t capacity, uint64_t key) {
+    uint64_t i = sheaf_table_hash(key) & (capacity - 1);
+    while (SHEAF_SLOT(slots, slot, i)[1] && SHEAF_SLOT(slots, slot, i)[0] != key)
+        i = (i + 1) & (capacity - 1);
+    return i;
+}
+
+/* An empty table that has room for HINT entries before it grows, pushed to ON after HEADER bytes of its owner's header. */
+static SHEAF_UNUSED sheaf_table *sheaf_table_new(sheaf_stack *on, size_t header, size_t slot, size_t align, uint64_t hint) {
+    uint64_t capacity = SHEAF_TABLE_MIN;
+    while (capacity * 3 < hint * 4)
+        capacity *= 2;
+    sheaf_table *table = sheaf_push(on, header + capacity * slot, align);
+    table->stack = on;
+    table->count = 0;
+    table->capacity = capacity;
+    memset((char *)table + header, 0, capacity * slot);
+    return table;
+}
+
+static SHEAF_UNUSED uint64_t sheaf_table_find(sheaf_table *table, char *slots, size_t slot, uint64_t key) {
+    uint64_t i = sheaf_table_probe(slots, slot, table->capacity, key);
+    return SHEAF_SLOT(slots, slot, i)[1] ? i : table->capacity;
+}
+
+/* Build a table twice the size above the old slots, then move it down so it stays on top of its stack. */
+static SHEAF_UNUSED void sheaf_table_grow(sheaf_table *table, char *slots, size_t slot) {
+    uint64_t old = table->capacity, capacity = old * 2;
+    char *fresh = sheaf_grow(table->stack, slots + old * slot, capacity * slot);
+    memset(fresh, 0, capacity * slot);
+    for (uint64_t i = 0; i < old; i++) {
+        uint64_t *from = SHEAF_SLOT(slots, slot, i);
+        if (from[1])
+            memcpy(SHEAF_SLOT(fresh, slot, sheaf_table_probe(fresh, slot, capacity, from[0])), from, slot);
+    }
+    memmove(slots, fresh, capacity * slot);
+    sheaf_shrink(table->stack, fresh + capacity * slot, slots + capacity * slot);
+    table->capacity = capacity;
+}
+
+/* The slot to write KEY's value to; the table grows first when it is three quarters full. */
+static SHEAF_UNUSED uint64_t sheaf_table_insert(sheaf_table *table, char *slots, size_t slot, uint64_t key) {
+    if (slots + table->capacity * slot != table->stack->top)
+        sheaf_grew_under(table->stack);
+    uint64_t i = sheaf_table_probe(slots, slot, table->capacity, key);
+    if (SHEAF_SLOT(slots, slot, i)[1])
+        return i;
+    if ((table->count + 1) * 4 > table->capacity * 3) {
+        sheaf_table_grow(table, slots, slot);
+        i = sheaf_table_probe(slots, slot, table->capacity, key);
+    }
+    SHEAF_SLOT(slots, slot, i)[0] = key;
+    SHEAF_SLOT(slots, slot, i)[1] = 1;
+    table->count++;
+    return i;
+}
+
+/* Remove KEY, shifting later entries of its probe run back so no tombstone is left. */
+static SHEAF_UNUSED void sheaf_table_remove(sheaf_table *table, char *slots, size_t slot, uint64_t key) {
+    if (slots + table->capacity * slot != table->stack->top)
+        sheaf_grew_under(table->stack);
+    uint64_t mask = table->capacity - 1, i = sheaf_table_probe(slots, slot, table->capacity, key);
+    if (!SHEAF_SLOT(slots, slot, i)[1])
+        return;
+    table->count--;
+    for (uint64_t j = (i + 1) & mask; SHEAF_SLOT(slots, slot, j)[1]; j = (j + 1) & mask) {
+        uint64_t home = sheaf_table_hash(SHEAF_SLOT(slots, slot, j)[0]) & mask;
+        if (((j - home) & mask) >= ((j - i) & mask)) {
+            memcpy(SHEAF_SLOT(slots, slot, i), SHEAF_SLOT(slots, slot, j), slot);
+            i = j;
+        }
+    }
+    memset(SHEAF_SLOT(slots, slot, i), 0, slot);
 }
 
 static SHEAF_UNUSED SHEAF_NORETURN void sheaf_no_match(void) {
