@@ -93,16 +93,16 @@ pool of its own holds."
                                (ir-match-branches node))))))
     (scan (ir-def-body def) (fresh-p (ir-def-name def)))))
 
-;; Could use `needs` so a cycle that builds only growable values takes no region.
 (defun builds-storage-p (def)
-  "Whether DEF builds any storage at all."
+  "Whether DEF builds cells or arrays, which a region holds. Growable values go
+on stacks of their own."
   (block found
     (walk-ir (lambda (node)
                (when (typecase node
                        (ir-construct (pooled-p (ir-node-type node)))
-                       (ir-call (fresh-p (ir-call-function node)))
-                       (ir-prim (primitive-allocates (ir-prim-op node)))
-                       (ir-let (resizable-node-p (ir-let-value node))))
+                       (ir-call (placement-ordinary (callee-placement node)))
+                       (ir-prim (and (primitive-allocates (ir-prim-op node))
+                                     (not (resizable-node-p node)))))
                  (return-from found t)))
              (ir-def-body def))
     nil))

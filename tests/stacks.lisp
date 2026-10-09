@@ -315,6 +315,11 @@ body BODY-FN builds from a function that makes a call of `make`."
     (is (= 1 (length (sheaf:ir-def-growables down))))
     (is (eq (sheaf:ir-def-name down) (sheaf:ir-call-function (first (calls down)))))))
 
+(test a-cycle-that-builds-only-growables-takes-no-region
+  (let* ((main (first (clones "growables" "MAIN-DOWN")))
+         (entry (call-to main "growables" "FILLED-DOWN")))
+    (is (null (sheaf:ir-call-region entry)))))
+
 (test a-growable-built-at-every-level-of-a-cycle-is-rejected
   (is (search "sheaf/31"
               (error-text (lambda () (sheaf:assign-stacks (lowered-from "growables" "VECTORS-DOWN")))))))

@@ -112,4 +112,5 @@ freed.
     Branches share stacks. A recursive cycle repeats until its counts stop
     changing.
 [^region]: A cycle of functions whose results hold no storage and that build
-    none takes no region.
+    no cells or arrays takes no region. Growable values go on stacks of their
+    own, so a cycle that builds only those takes none either.
