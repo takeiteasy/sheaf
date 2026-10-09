@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 #ifndef SHEAF_STACK_SIZE
 #define SHEAF_STACK_SIZE ((size_t)1 << 32)
@@ -22,6 +23,16 @@
 
 #ifndef SHEAF_SLICE_SIZE
 #define SHEAF_SLICE_SIZE ((size_t)1 << 30)
+#endif
+
+#ifndef SHEAF_SLICE_KEEP
+#define SHEAF_SLICE_KEEP ((size_t)1 << 16)
+#endif
+
+#ifdef __APPLE__
+#define SHEAF_MADV_FREE MADV_FREE
+#else
+#define SHEAF_MADV_FREE MADV_DONTNEED
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -122,7 +133,6 @@ typedef struct {
 static char *sheaf_slices, *sheaf_fresh;
 static sheaf_slice *sheaf_free_slices;
 
-/* TODO: freed slices stay committed, so memory use stays at its high-water mark; madvise them if that matters (#36). */
 static SHEAF_UNUSED sheaf_stack *sheaf_bank_stack(sheaf_bank *bank) {
     sheaf_slice *slice = sheaf_free_slices;
     if (slice) {
@@ -152,11 +162,24 @@ static SHEAF_UNUSED sheaf_stack *sheaf_bank_stack(sheaf_bank *bank) {
     return &slice->stack;
 }
 
+/* Return the pages of SLICE past the first SHEAF_SLICE_KEEP bytes to the OS. */
+static void sheaf_slice_decommit(sheaf_slice *slice) {
+    static uintptr_t page;
+    if (!page)
+        page = (uintptr_t)sysconf(_SC_PAGESIZE);
+    uintptr_t from = (uintptr_t)slice + (SHEAF_SLICE_KEEP > sizeof *slice ? SHEAF_SLICE_KEEP : sizeof *slice);
+    from = (from + page - 1) & ~(page - 1);
+    uintptr_t to = ((uintptr_t)slice->stack.top + page - 1) & ~(page - 1);
+    if (to > from)
+        madvise((void *)from, to - from, SHEAF_MADV_FREE);
+}
+
 /* Give back the slices taken since MARK, the bank's head when its owner began. */
 static SHEAF_UNUSED void sheaf_bank_release(sheaf_bank *bank, sheaf_slice *mark) {
     while (bank->head != mark) {
         sheaf_slice *slice = bank->head;
         bank->head = slice->next;
+        sheaf_slice_decommit(slice);
         slice->next = sheaf_free_slices;
         sheaf_free_slices = slice;
     }

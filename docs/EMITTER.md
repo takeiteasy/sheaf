@@ -85,6 +85,7 @@ list when it ends.
 |---|---|---|
 | `SHEAF_BANK_SPACE` | 32 TiB | The reservation, reserved with `MAP_NORESERVE` |
 | `SHEAF_SLICE_SIZE` | 1 GiB | Each growable value's ceiling |
+| `SHEAF_SLICE_KEEP` | 64 KiB | What a freed slice keeps committed; the rest goes back to the OS[^madvise] |
 
 Depth is the space divided by the slice, about 32,000 banked values by default.
 A slice past either limit prints `bank space exhausted` or `a bank slice exhausted` and exits.
@@ -107,8 +108,6 @@ A slice past either limit prints `bank space exhausted` or `a bank slice exhaust
 - Raw Lisp is an error: [#16](https://todo.sr.ht/~takeiteasy/sheaf/16),
   [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
 - `HashTable`: [#32](https://todo.sr.ht/~takeiteasy/sheaf/32).
-- A bank's freed slices stay committed:
-  [#36](https://todo.sr.ht/~takeiteasy/sheaf/36).
 - Only `UFix` and the data types built from it are emitted:
   [#23](https://todo.sr.ht/~takeiteasy/sheaf/23).
 - `UFix` arithmetic wraps at 64 bits: [#9](https://todo.sr.ht/~takeiteasy/sheaf/9).
@@ -121,3 +120,5 @@ A slice past either limit prints `bank space exhausted` or `a bank slice exhaust
 [^links]: A pointer into a data stack stays valid because nothing on a stack
     moves. [MEMORY.md](MEMORY.md) describes the smaller relative links the
     pointers will become.
+[^madvise]: `madvise` with `MADV_FREE` on macOS and `MADV_DONTNEED` elsewhere,
+    on the whole pages between the kept bytes and the slice's top.

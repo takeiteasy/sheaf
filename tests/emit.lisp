@@ -94,6 +94,13 @@ and exit code."
     (is (= (sheaf:run-lowered (sheaf:assign-stacks (lowered-from "growables" "MAIN-REUSE")))
            (parse-integer output)))))
 
+(test freed-slices-are-returned-to-the-os
+  (multiple-value-bind (output errors code) (apply #'banked-c "MAIN-REUSE" "-DSHEAF_SLICE_KEEP=0" *small-banks*)
+    (declare (ignore errors))
+    (is (zerop code))
+    (is (= (sheaf:run-lowered (sheaf:assign-stacks (lowered-from "growables" "MAIN-REUSE")))
+           (parse-integer output)))))
+
 (test a-cycle-deeper-than-the-bank-space-aborts-in-c
   (multiple-value-bind (output errors code) (apply #'banked-c "MAIN-DEEP" *small-banks*)
     (declare (ignore output))
