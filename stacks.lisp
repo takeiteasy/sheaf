@@ -93,6 +93,7 @@ pool of its own holds."
                                (ir-match-branches node))))))
     (scan (ir-def-body def) (fresh-p (ir-def-name def)))))
 
+;; Could use `needs` so a cycle that builds only growable values takes no region.
 (defun builds-storage-p (def)
   "Whether DEF builds any storage at all."
   (block found
@@ -149,13 +150,21 @@ REACHED holds the names of the lets whose values reach the result."
                     (setf ordinary (or ordinary branch-ordinary)
                           growables (max growables branch-growables))))))))
 
+(defun returns-own-name-p (let-node)
+  "Whether LET-NODE ends by returning the value it binds."
+  (loop :for body := (ir-let-body let-node) :then (ir-let-body body)
+        :unless (typep body 'ir-let)
+          :return (and (typep body 'ir-local) (eq (ir-local-name body) (ir-let-name let-node)))))
+
 (defun tail-need (node)
   "How many stacks the growable values NODE returns need."
   (etypecase node
     ((or ir-atom ir-construct) 0)
     ((or ir-prim ir-foreign) (if (growable-site-p node) 1 0))
     (ir-call (placement-growables (callee-placement node)))
-    (ir-let (tail-need (ir-let-body node)))
+    (ir-let (if (returns-own-name-p node)
+                (tail-need (ir-let-value node))
+                (tail-need (ir-let-body node))))
     (ir-match (reduce #'max (ir-match-branches node) :key (lambda (branch) (tail-need (ir-branch-body branch)))
                                                       :initial-value 0))))
 
@@ -188,6 +197,9 @@ growable value is built at every level of their recursion."
         (loop :for changed := nil
               :do (dolist (name members)
                     (let ((new (def-placement (gethash name defs))))
+                      ;; TODO: a cycle that builds a growable value at every level is rejected,
+                      ;; a region of stacks that grows with the recursion would place it.
+                      ;; https://todo.sr.ht/~takeiteasy/sheaf/31
                       (when (> (placement-growables new) bound)
                         (error "~s builds a growable value at every level of its recursive cycle: https://todo.sr.ht/~~takeiteasy/sheaf/31"
                                name))
@@ -307,12 +319,13 @@ allocates in, and the stacks in use on entry."
                  (ir-let
                   (let* ((value (ir-let-value node))
                          (reaches-value (gethash (ir-let-name node) reached))
-                         (stacks (unless reaches-value (take-stacks (tail-need value) busy)))
+                         (returned (and (not reaches-value) (returns-own-name-p node)))
+                         (stacks (unless (or reaches-value returned) (take-stacks (tail-need value) busy)))
                          (inner (reduce #'with-index stacks :initial-value busy))
                          (used (nth-value 1 (needs value reaches-value reached)))
                          (copy (copy-ir-let node)))
                     (setf (ir-let-stacks copy) stacks
-                          (ir-let-value copy) (rewrite value reaches-value inner stacks supply)
+                          (ir-let-value copy) (rewrite value reaches-value inner (if returned owned stacks) supply)
                           (ir-let-body copy) (rewrite (ir-let-body node) reaches inner owned (nthcdr used supply)))
                     copy))
                  (ir-call (rewrite-call node reaches busy owned supply))

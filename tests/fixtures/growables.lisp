@@ -4,7 +4,8 @@
 (defpackage #:sheaf/fixtures/growables
   (:use #:coalton #:coalton-prelude)
   (:local-nicknames
-   (#:vector #:coalton/vector)))
+   (#:vector #:coalton/vector)
+   (#:cell #:coalton/cell)))
 
 (in-package #:sheaf/fixtures/growables)
 
@@ -61,6 +62,22 @@
           Nil
           (Cons v (vectors-down (- n 1))))))
 
+  (declare picked (UFix -> UFix))
+  (define (picked n)
+    (let ((x (if (== n 0)
+                 (let ((v (the (vector:Vector UFix) (vector:new))))
+                   (vector:push! 1 v)
+                   v)
+                 (the (vector:Vector UFix) (vector:new)))))
+      (vector:push! 9 x)
+      (vector:length x)))
+
+  (declare in-cell (UFix -> (cell:Cell (vector:Vector UFix))))
+  (define (in-cell n)
+    (let ((v (the (vector:Vector UFix) (vector:new))))
+      (vector:push! n v)
+      (cell:new v)))
+
   (declare table (vector:Vector UFix))
   (define table
     (let ((v (the (vector:Vector UFix) (vector:new))))
@@ -112,6 +129,16 @@
       (vector:push! 9 v)
       (vector:length v)))
 
+  (declare main-picked (Void -> UFix))
+  (define (main-picked)
+    (picked 0))
+
+  (declare main-cell (Void -> UFix))
+  (define (main-cell)
+    (let ((v (cell:read (in-cell 3))))
+      (vector:push! 9 v)
+      (vector:length v)))
+
   (declare main-table (Void -> UFix))
   (define (main-table)
     (vector:length table))
@@ -123,4 +150,4 @@
           (+ (main-relay)
              (+ (main-either)
                 (+ (main-listed)
-                   (+ (main-down) (main-table)))))))))
+                   (+ (main-down) (+ (main-picked) (+ (main-cell) (main-table)))))))))))

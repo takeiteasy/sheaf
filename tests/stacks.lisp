@@ -260,7 +260,7 @@ body BODY-FN builds from a function that makes a call of `make`."
 
 (test growables-give-one-result-on-every-tier
   (let ((expected (run-on-sbcl "growables")))
-    (is (= 20 expected))
+    (is (= 24 expected))
     (is (= expected (sheaf:run-lowered (lowered "growables"))))
     (is (= expected (sheaf:run-lowered (assigned "growables"))))))
 
