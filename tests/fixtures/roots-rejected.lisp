@@ -1,5 +1,6 @@
 ;;;; roots-rejected.lisp
-;;;; Each root stores a reference into storage that outlives its root.
+;;;; Each root stores a reference into storage that outlives its root, or lets
+;;;; one leave a branch that frees what it points into.
 
 (defpackage #:sheaf/fixtures/roots-rejected
   (:use #:coalton #:coalton-prelude #:sheaf/prelude)
@@ -113,15 +114,6 @@
       (arr:set! table 0 (arr:ref inner 0))
       0))
 
-  (declare escape-branch (Void -> UFix))
-  (define (escape-branch)
-    (let ((base (arr:new 1 0)))
-      (let ((r (if (== (the UFix 1) 1)
-                   (let ((a (arr:new 1 0)))
-                     (arr:ref a 0))
-                   (arr:ref base 0))))
-        (ref:get r))))
-
   (declare escape-grown (Void -> UFix))
   (define (escape-grown)
     (let ((base (arr:new 1 0)))
@@ -132,17 +124,35 @@
                    (arr:ref base 0))))
         (ref:get r))))
 
-  (declare return-holding (Void -> Array (Ref UFix)))
-  (define (return-holding)
-    (let ((inner (arr:new 1 0)))
-      (arr:new 1 (arr:ref inner 0))))
+  (declare escape-owned (Void -> UFix))
+  (define (escape-owned)
+    (let ((base (arr:new 1 0)))
+      (let ((r (if (== (the UFix 1) 1)
+                   (let ((v (if (== (the UFix 2) 2)
+                                (let ((g (the (GrowArray UFix) (grow:new))))
+                                  (grow:push! g 7)
+                                  g)
+                                (let ((h (the (GrowArray UFix) (grow:new))))
+                                  (grow:push! h 8)
+                                  h))))
+                     (arr:ref v 0))
+                   (arr:ref base 0))))
+        (ref:get r))))
 
-  (declare return-stored (Void -> Array (Ref UFix)))
-  (define (return-stored)
-    (let ((inner (arr:new 1 0)))
-      (let ((out (arr:new 1 (arr:ref inner 0))))
-        (arr:set! out 0 (arr:ref inner 0))
-        out)))
+  (declare make-grown (UFix -> GrowArray UFix))
+  (define (make-grown n)
+    (let ((g (the (GrowArray UFix) (grow:new))))
+      (grow:push! g n)
+      g))
+
+  (declare escape-called (Void -> UFix))
+  (define (escape-called)
+    (let ((base (arr:new 1 0)))
+      (let ((r (if (== (the UFix 1) 1)
+                   (let ((g (make-grown 5)))
+                     (arr:ref g 0))
+                   (arr:ref base 0))))
+        (ref:get r))))
 
   (declare recursive-store (Void -> UFix))
   (define (recursive-store)

@@ -30,7 +30,7 @@ upper case."
 (test accepted-references-run-on-every-tier
   (fixture-program "roots")
   (let ((expected (funcall (symbol-function (fixture-symbol "roots" "MAIN")))))
-    (is (= 44 expected))
+    (is (= 86 expected))
     (is (= expected (sheaf:run-lowered (lowered "roots"))))
     (is (= expected (sheaf:run-lowered (assigned "roots"))))))
 
@@ -87,32 +87,26 @@ upper case."
              (chain-texts (root-error "RECURSIVE-STORE")))))
 
 (test a-reference-cannot-outlive-its-branch
-  (let ((condition (root-error "ESCAPE-BRANCH")))
+  (let ((condition (root-error "ESCAPE-GROWN")))
     (is-true condition)
     (is (search "branch" (sheaf:specialization-error-message condition)))
     (destructuring-bind (reference match) (chain-texts condition)
-      (is (equal "(arr:ref a 0)" reference))
+      (is (equal "(arr:ref g 0)" reference))
       (is (eql 0 (search "(if " match))))))
-
-(test returned-storage-cannot-hold-a-reference-into-a-local
-  (let ((condition (root-error "RETURN-HOLDING")))
-    (is (search "returning" (sheaf:specialization-error-message condition)))
-    (is (equal '("(arr:ref inner 0)" "(arr:new 1 (arr:ref inner 0))")
-               (subseq (chain-texts condition) 0 2))))
-  (let ((condition (root-error "RETURN-STORED")))
-    (is (search "returning" (sheaf:specialization-error-message condition)))))
 
 (defun error-message (thunk)
   (handler-case (progn (funcall thunk) "")
     (error (condition) (princ-to-string condition))))
 
-(test a-rejected-program-does-not-run-safely
-  (is-true (root-error "ESCAPE-GROWN"))
-  (is (search "freed"
-              (error-message
-               (lambda ()
-                 (sheaf:run-lowered
-                  (sheaf:assign-stacks (root-program "roots-rejected" "ESCAPE-GROWN"))))))))
+(test a-rejected-branch-escape-does-not-run-safely
+  (dolist (root '("ESCAPE-GROWN" "ESCAPE-OWNED" "ESCAPE-CALLED"))
+    (is-true (root-error root) "~a" root)
+    (is (search "freed"
+                (error-message
+                 (lambda ()
+                   (sheaf:run-lowered
+                    (sheaf:assign-stacks (root-program "roots-rejected" root))))))
+        "~a" root)))
 
 (test a-returned-reference-keeps-its-array-in-the-destination
   (let ((clone (first (clones "roots" "FRESH-REF"))))

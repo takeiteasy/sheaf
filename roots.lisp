@@ -52,6 +52,29 @@ container.")
   "The expression a body of nested lets ends in."
   (if (typep node 'ir-let) (tail-node (ir-let-body node)) node))
 
+(defun freed-lets (node reached)
+  "The names of the lets in NODE whose growable stacks are freed before NODE
+ends, as stack assignment gives them out. REACHED holds the locals the result
+holds, which are built in the caller's stacks."
+  (labels ((collect (node dying)
+             "DYING is true when the stacks a returned let takes belong to a let in NODE."
+             (etypecase node
+               ((or ir-atom ir-prim ir-call ir-construct ir-foreign) '())
+               (ir-let
+                (let* ((value (ir-let-value node))
+                       (reaches (gethash (ir-let-name node) reached))
+                       (returned (and (not reaches) (returns-own-name-p node)))
+                       (frees (or (and (not reaches) (not returned)
+                                       (or (plusp (tail-need value)) (tail-banked-p value)))
+                                  (and returned dying))))
+                  (append (and frees (list (ir-let-name node)))
+                          (collect value frees)
+                          (collect (ir-let-body node) dying))))
+               (ir-match
+                (loop :for branch :in (ir-match-branches node)
+                      :append (collect (ir-branch-body branch) dying))))))
+    (collect node nil)))
+
 (defun root-text (root def-name)
   (cond ((integerp root) (format nil "parameter ~d of ~a" root def-name))
         ((eq root :global) "a global")
@@ -72,10 +95,9 @@ is true a store that no caller could make safe is an error."
          (contents (make-hash-table :test 'eq))
          (origins (make-hash-table :test 'eq))
          (links (make-hash-table :test 'eq))
-         (reference-roots (make-hash-table :test 'eq))
-         (sites (make-hash-table :test 'eq))
          (locals (make-hash-table :test 'eq))
          (stores '())
+         (branches '())
          (*here* (ir-def-location def)))
     (labels ((entry (text)
                (list def-name text *here*))
@@ -112,9 +134,7 @@ is true a store that no caller could make safe is an error."
                           (fail (cons (reference-entry value-atom) trail)
                                 "Root checking rejects storing a reference rooted at ~a into storage rooted at ~a, which outlives it"
                                 (root-text value def-name) (root-text container def-name))))
-                   (add-contents container (list value))
-                   (unless (gethash value sites)
-                     (setf (gethash value sites) (cons (reference-entry value-atom) trail))))))
+                   (add-contents container (list value)))))
              (walk (node env depth owner)
                (let ((*here* (or (ir-node-location node) *here*)))
                  (etypecase node
@@ -149,7 +169,6 @@ is true a store that no caller could make safe is an error."
                (let ((name (ir-let-name node))
                      (type (ir-node-type (ir-let-value node))))
                  (setf (gethash name depths) depth
-                       (gethash name reference-roots) (and (holds-reference-p type) (not (pooled-p type)))
                        (gethash name origins) (list (format nil "a value of type ~a" (type-text (ir-node-type (ir-let-value node))))
                                                     (or (ir-node-location (ir-let-value node)) *here*)))
                  (let ((roots (let ((reached (walk (ir-let-value node) env (1+ depth) name)))
@@ -167,14 +186,7 @@ is true a store that no caller could make safe is an error."
                      (:allocates
                       (let ((root (fresh-root owner)))
                         (when first-index
-                          (let* ((initial (nth first-index args))
-                                 (reached (walk initial env depth owner)))
-                            (add-contents root reached)
-                            (dolist (held reached)
-                              (unless (gethash held sites)
-                                (setf (gethash held sites)
-                                      (list (reference-entry initial)
-                                            (entry "the array it initialises")))))))
+                          (add-contents root (walk (nth first-index args) env depth owner)))
                         (list root)))
                      (:stores
                       (let ((value (nth first-index args)))
@@ -213,18 +225,14 @@ is true a store that no caller could make safe is an error."
                       (result '()))
                  (dolist (branch (ir-match-branches node))
                    (let ((roots (walk (ir-branch-body branch) (branch-env branch scrutinee env) depth owner)))
-                     (unless (eq owner :fresh)
-                       (dolist (root (closure roots (list links)))
-                         (when (and (symbolp root) (gethash root reference-roots)
-                                    (not (member root (list :global :fresh owner)))
-                                    (>= (gethash root depths) depth))
-                           (fail (list (let ((tail (tail-node (ir-branch-body branch))))
-                                         (list def-name (format nil "the reference of type ~a leaving the branch"
-                                                                (type-text (ir-node-type tail)))
-                                               (or (ir-node-location tail) *here*)))
-                                       match-entry)
-                                 "Root checking rejects a reference rooted at ~a that outlives the branch it is made in"
-                                 (root-text root def-name)))))
+                     (when report
+                       (let ((tail (tail-node (ir-branch-body branch))))
+                         (push (list roots (ir-branch-body branch)
+                                     (list (list def-name (format nil "the reference of type ~a leaving the branch"
+                                                                  (type-text (ir-node-type tail)))
+                                                 (or (ir-node-location tail) *here*))
+                                           match-entry))
+                               branches)))
                      (setf result (merge-roots roots result))))
                  result))
              (branch-env (branch scrutinee env)
@@ -234,11 +242,6 @@ is true a store that no caller could make safe is an error."
                                  (list (format nil "a value of type ~a bound by a match" (type-text type)) *here*)
                              env (acons name scrutinee env)))
                env)
-             (root-entry (root)
-               (let ((origin (gethash root origins)))
-                 (if origin
-                     (list def-name (first origin) (second origin))
-                     (entry "the root"))))
              (closure (roots tables)
                "ROOTS and everything the storage among them holds, following TABLES."
                (let ((seen '()) (pending (copy-list roots)))
@@ -258,42 +261,44 @@ is true a store that no caller could make safe is an error."
                           :collect (cons (car (nth index (ir-def-params def))) (list index))))
              (roots (let ((reached (walk (ir-def-body def) env 0 :fresh)))
                       (and (holds-storage-p (ir-def-result def)) reached)))
+             (reached (remove-if (lambda (root) (or (not (symbolp root)) (keywordp root)))
+                                 (closure roots (list contents links))))
              (result '()))
-        ;; Stack assignment builds every local in REACHED in the caller's
-        ;; destinations, so the rules below are stricter than it needs.
-        ;; TODO: reject only what stack assignment does not place in the
-        ;; destinations.
-        ;; https://todo.sr.ht/~takeiteasy/sheaf/28
+        (when report
+          (let ((live (make-hash-table :test 'eq)))
+            (dolist (name reached)
+              (setf (gethash name live) t))
+            (loop :for (branch-roots body chain) :in (nreverse branches)
+                  :do (let ((freed (freed-lets body live)))
+                        (dolist (root (closure branch-roots (list links contents)))
+                          (when (member root freed)
+                            (fail chain "Root checking rejects a reference rooted at ~a that outlives the branch it is made in"
+                                  (root-text root def-name))))))))
         (dolist (root (closure roots (list links)))
           (cond ((integerp root) (pushnew root result))
                 ((eq root :global) (pushnew :global result))
                 (t (pushnew :fresh result)
                    (dolist (held (remove root (closure (list root) (list contents))))
                      (cond ((integerp held) (pushnew held result))
-                           ((eq held :global) (pushnew :global result))
-                           ((eq held :fresh))
-                           ((not (gethash held reference-roots)))
-                           (t (fail (append (or (gethash held sites) (list (root-entry held)))
-                                            (list (list def-name "the result" (ir-def-location def))))
-                                    "Root checking rejects returning storage that holds a reference rooted at ~a"
-                                    (root-text held def-name))))))))
+                           ((eq held :global) (pushnew :global result)))))))
         (make-root-summary :result (nreverse result)
                            :stores (reverse stores)
                            :locals locals
-                           :reached (remove-if (lambda (root) (or (not (symbolp root)) (keywordp root)))
-                                               (closure roots (list contents links))))))))
+                           :reached reached)))))
 
 (defun root-summaries (lowered &key report)
   "A table from the name of each def in LOWERED to its `root-summary`. When
-REPORT is true a store that no caller could make safe is an error."
+REPORT is true a store that no caller could make safe, or a reference that
+leaves a branch which frees what it points into, is an error."
   (let* ((*lowered* lowered)
          (*storage* (make-hash-table :test 'eq))
          (*reference-types* (make-hash-table :test 'eq))
          (defs (lowered-defs lowered))
-         (summaries (make-hash-table :test 'eq)))
-    (dolist (scc (strongly-connected-components
-                  (loop :for name :being :the :hash-keys :of defs :collect name)
-                  (lambda (name) (callees (gethash name defs)))))
+         (summaries (make-hash-table :test 'eq))
+         (sccs (strongly-connected-components
+                (loop :for name :being :the :hash-keys :of defs :collect name)
+                (lambda (name) (callees (gethash name defs))))))
+    (dolist (scc sccs)
       (dolist (name scc)
         (setf (gethash name summaries) (make-root-summary)))
       (loop :for changed := nil
@@ -302,14 +307,18 @@ REPORT is true a store that no caller could make safe is an error."
                     (unless (summary-equal new (gethash name summaries))
                       (setf changed t))
                     (setf (gethash name summaries) new)))
-            :while changed)
-      (when report
-        (dolist (name scc)
-          (setf (gethash name summaries) (summarize (gethash name defs) summaries t)))))
+            :while changed))
+    (when report
+      (let* ((*summaries* summaries)
+             (*placements* (compute-placements defs)))
+        (dolist (scc sccs)
+          (dolist (name scc)
+            (setf (gethash name summaries) (summarize (gethash name defs) summaries t))))))
     summaries))
 
 (defun check-roots (lowered)
   "Signal a `specialization-error` naming both the reference and the store unless
-every store of a reference in LOWERED goes into storage its root outlives.
+every store of a reference in LOWERED goes into storage its root outlives, and
+no reference leaves a branch whose growable stacks are freed when it ends.
 Returns a table from the name of each def to its `root-summary`."
   (root-summaries lowered :report t))

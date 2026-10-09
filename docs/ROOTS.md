@@ -1,8 +1,10 @@
 # Roots
 
 `check-roots` rejects a program that stores a reference where its root does
-not outlive the storage. It reads the lowered IR ([IR.md](IR.md)) and needs no
-stack assignment; stack assignment ([STACKS.md](STACKS.md)) uses its summaries.
+not outlive the storage, or that lets a reference leave a branch that frees
+what it points into. It reads the lowered IR ([IR.md](IR.md)) and works out
+which growable stacks stack assignment frees without assigning any; stack
+assignment ([STACKS.md](STACKS.md)) uses its summaries.
 
 ```lisp
 (let ((ir (sheaf:lower (sheaf:defunctionalize (sheaf:monomorphize program 'my-package::main)))))
@@ -55,8 +57,18 @@ local.
 | A local | A local made no later than it | Accepted |
 | A local | A parameter, a global, or an older local | Error |
 
-A value that leaves a `match` branch may not be rooted in an array, `Cell` or
-reference the branch makes, and a list or other cell does not count.
+A reference may not leave a `match` branch when it points into a growable
+value the branch frees[^freed]. Arrays, `Cell`s and lists made in a branch live
+until the function returns, so a reference to them may leave.
+
+```lisp
+(let ((r (if (== n 0)
+             (let ((g (grow:new)))
+               (grow:push! g 7)
+               (arr:ref g 0))                  ; error: g is freed when the branch ends
+             (arr:ref base 0))))
+  (ref:get r))
+```
 
 ## Summaries
 
@@ -79,14 +91,14 @@ errors.
 
 ## Returning storage
 
-A function may return a reference into an array it builds: the array is built
-in the caller's destinations ([STACKS.md](STACKS.md)). A returned array may not
-hold a reference into another local. A list or other cell may.
+A function may return a reference into an array it builds, and the array may
+hold references into its other locals: whatever the result reaches is built in
+the caller's destinations ([STACKS.md](STACKS.md)).
 
 ## Limitations
 
-- The return-storage and branch-escape rules reject some safe programs:
-  [#28](https://todo.sr.ht/~takeiteasy/sheaf/28).
+- The store rule compares `let` depths and rejects some safe stores between
+  storage in the same pool: [#39](https://todo.sr.ht/~takeiteasy/sheaf/39).
 - The SBCL path does not run the check:
   [#17](https://todo.sr.ht/~takeiteasy/sheaf/17).
 
@@ -94,3 +106,9 @@ hold a reference into another local. A list or other cell may.
     bound its lifetime without naming where it points. A reference read out of
     an array and stored into a younger array is accepted only if the array it
     was read from outlives that array too.
+
+[^freed]: A growable local is freed when its `let` ends, so a branch frees the
+    ones it binds unless the result holds them, or the branch returns them
+    to a `let` outside it. Roots are one per `let`, so a call result that holds
+    both a cell and a growable value has one root: a reference into its cell
+    part leaving a branch is rejected when the growable part is freed.
