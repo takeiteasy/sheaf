@@ -137,6 +137,11 @@ the run touched when the program has a stack assignment."
                               (slice-value (live value "A slice read")
                                (values (datum-fields (slice-value-target value))
                                        (slice-value-start value) (slice-value-end value)))))
+                          (vector-position (vector index)
+                            (let ((fields (datum-fields vector)))
+                              (unless (< -1 index (length fields))
+                                (error "The index ~d is outside the vector of ~d elements" index (length fields)))
+                              index))
                           (position-in (value index)
                             (multiple-value-bind (vector start end) (view value)
                               (unless (< -1 index (- end start))
@@ -147,15 +152,34 @@ the run touched when the program has a stack assignment."
                      (:array-new (allocate :variable (elements (first args) (second args)) node))
                      (:cell-new (allocate :fixed (elements 1 (first args)) node))
                      (:grow-new (allocate :grow (elements 0 nil) node))
-                     (:stack-new (allocate :grow-shrink (elements 0 nil) node))
+                     ((:stack-new :vector-new) (allocate :grow-shrink (elements 0 nil) node))
                      ((:grow-push :stack-push)
                       (vector-push-extend (second args) (growable (first args)))
                       (unit))
-                     (:stack-pop
+                     (:vector-push
+                      (vector-push-extend (first args) (growable (second args))))
+                     ((:stack-pop :vector-pop)
                       (let ((vector (growable (first args))))
                         (if (zerop (length vector))
                             (make-datum (constructor-named lowered type "NONE") '())
                             (make-datum (constructor-named lowered type "SOME") (list (vector-pop vector))))))
+                     (:vector-index
+                      (live (second args) "A vector read")
+                      (let ((vector (datum-fields (second args))))
+                        (if (< (first args) (length vector))
+                            (make-datum (constructor-named lowered type "SOME") (list (aref vector (first args))))
+                            (make-datum (constructor-named lowered type "NONE") '()))))
+                     (:vector-index-unsafe
+                      (live (second args) "A vector read")
+                      (aref (datum-fields (second args)) (vector-position (second args) (first args))))
+                     (:vector-set
+                      (live (third args) "A vector written")
+                      (setf (aref (datum-fields (third args)) (vector-position (third args) (first args)))
+                            (second args))
+                      (unit))
+                     (:vector-length
+                      (live (first args) "A vector read")
+                      (length (datum-fields (first args))))
                      (:elements-length
                       (multiple-value-bind (vector start end) (view (first args))
                         (declare (ignore vector))

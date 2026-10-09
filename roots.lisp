@@ -21,10 +21,12 @@ in the caller's destination."
 ;; op, how it treats roots, and the arguments it uses
 (defparameter *prim-roots*
   '((:fixed-new :allocates 0) (:array-new :allocates 1) (:grow-new :allocates) (:stack-new :allocates)
-    (:cell-new :allocates 0)
+    (:cell-new :allocates 0) (:vector-new :allocates)
+    (:vector-push :stores 0 1) (:vector-set :stores 1 2)
     (:grow-push :stores 1 0) (:stack-push :stores 1 0) (:ref-set :stores 1 0) (:elements-set :stores 2 0)
     (:cell-write :stores 1 0 :returns-stored) (:cell-swap :stores 1 0 :returns-container)
     (:stack-pop :reads 0) (:ref-get :reads 0) (:elements-index :reads 0) (:cell-read :reads 0)
+    (:vector-pop :reads 0) (:vector-index :reads 1) (:vector-index-unsafe :reads 1)
     (:elements-ref :reads 0) (:elements-slice :reads 0))
   "How the prelude's primitives treat roots. An allocating primitive makes a root
 and may store its initial element, a storing one stores the argument at its

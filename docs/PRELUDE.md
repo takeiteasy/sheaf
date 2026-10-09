@@ -1,8 +1,8 @@
 # Prelude
 
-`sheaf/prelude` gives a program arrays, slices and references that live on
-data stacks ([MEMORY.md](MEMORY.md)). Their operations are primitives of
-Sheaf's IR, so they lower, run and get stacks assigned like any other code.
+`sheaf/prelude` gives a program arrays, slices and references. Coalton's
+`Cell` and `Vector` are lowered the same way. They live on data stacks
+([MEMORY.md](MEMORY.md)), and their operations are primitives of Sheaf's IR, so they lower, run and get stacks assigned like any other code.
 
 ```lisp
 (defpackage #:my-program
@@ -31,10 +31,9 @@ Sheaf's IR, so they lower, run and get stacks assigned like any other code.
 | `(Slice :t)` | View | A range of an array |
 | `(Ref :t)` | View | One element of an array |
 | `(Cell :t)` | Fixed | One element; Coalton's `coalton/cell:Cell` |
+| `(Vector :t)` | Resizable, grow-shrink | Elements; Coalton's `coalton/vector:Vector`, with no references or slices |
 
-`Vector` and `Hashtable` are not part of the prelude
-([#29](https://todo.sr.ht/~takeiteasy/sheaf/29),
-[#30](https://todo.sr.ht/~takeiteasy/sheaf/30)).
+`Hashtable` is not part of the prelude ([#30](https://todo.sr.ht/~takeiteasy/sheaf/30)).
 
 ## Operations
 
@@ -48,6 +47,8 @@ Sheaf's IR, so they lower, run and get stacks assigned like any other code.
 | `grow` | `(new)`, `(push! a x)` | A `GrowArray`, and an append |
 | `stack` | `(new)`, `(push! s x)`, `(pop! s)` | A `Stack`; `pop!` returns an `Optional` |
 | `ref` | `(get r)`, `(set! r x)` | Read and write the element |
+| `coalton/vector` | `(new)`, `(push! x v)`, `(pop! v)` | A `Vector`, an append that returns the new index, and a removal that returns an `Optional` |
+| `coalton/vector` | `(index i v)`, `(index-unsafe i v)`, `(set! i x v)`, `(length v)` | An `Optional` element, an element, a write, and the length |
 | `coalton/cell` | `(new x)`, `(read c)`, `(write! c x)`, `(swap! c x)` | A `Cell`, its contents, and a write that returns the new or the old value |
 
 Mutating operations return `Unit`. An index outside an array is an error.
@@ -57,8 +58,8 @@ Arrays are shared, not copied, when bound to another name.
 
 An array is built like any other storage ([STACKS.md](STACKS.md)): in the
 caller's destination when it may reach the result, otherwise in the
-function's pool. A `GrowArray` or `Stack` bound by a `let` owns a stack for
-that `let`, and the interpreter checks it is on top of the stack when it
+function's pool. A `GrowArray`, `Stack` or `Vector` bound by a `let` owns a stack for that
+`let`, and the interpreter checks it is on top of the stack when it
 grows.
 
 ## Limitations
@@ -67,7 +68,9 @@ grows.
   [#27](https://todo.sr.ht/~takeiteasy/sheaf/27).
 - Elements other than `UFix` and the data types built from it have no
   primitives: [#23](https://todo.sr.ht/~takeiteasy/sheaf/23).
-- A returned `GrowArray` built in a destination is not guaranteed to stay on
+- Vector functions other than the ones above hold raw Lisp:
+  [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
+- A returned `GrowArray` or `Vector` built in a destination is not guaranteed to stay on
   top of its stack: [#24](https://todo.sr.ht/~takeiteasy/sheaf/24).
 
 [^len]: A `FixedArray` length is read from the type after monomorphization,

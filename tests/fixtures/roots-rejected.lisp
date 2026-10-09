@@ -7,7 +7,8 @@
    (#:arr #:sheaf/prelude/arr)
    (#:cell #:coalton/cell)
    (#:grow #:sheaf/prelude/grow)
-   (#:ref #:sheaf/prelude/ref)))
+   (#:ref #:sheaf/prelude/ref)
+   (#:vector #:coalton/vector)))
 
 (in-package #:sheaf/fixtures/roots-rejected)
 
@@ -68,6 +69,13 @@
         (let ((inner (arr:new 1 0)))
           (cell:write! outer (arr:ref inner 0))
           0))))
+
+  (declare vector-push-inner (Void -> UFix))
+  (define (vector-push-inner)
+    (let ((outer (the (Vector (Ref UFix)) (vector:new))))
+      (let ((inner (arr:new 1 0)))
+        (vector:push! (arr:ref inner 0) outer)
+        0)))
 
   (declare push-inner (Void -> UFix))
   (define (push-inner)

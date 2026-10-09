@@ -129,15 +129,18 @@ reaches, and its root."
     (sheaf/prelude:stack :storage :grow-shrink)
     (sheaf/prelude:slice :view)
     (sheaf/prelude:ref :view)
-    (coalton/cell:cell :storage :fixed))
+    (coalton/cell:cell :storage :fixed)
+    (coalton/vector:vector :storage :grow-shrink))
   "The prelude's types: the kind of each, and for arrays how it is sized.")
 
 (defparameter *prelude-ops*
   '((:fixed-new 1 :fixed) (:array-new 2 :variable) (:grow-new 0 :resizable) (:stack-new 0 :resizable)
-    (:cell-new 1 :fixed)
+    (:cell-new 1 :fixed) (:vector-new 0 :resizable)
     (:grow-push 2) (:stack-push 2) (:stack-pop 1)
     (:ref-get 1) (:ref-set 2)
     (:cell-read 1) (:cell-write 2) (:cell-swap 2)
+    (:vector-push 2) (:vector-pop 1) (:vector-index 2) (:vector-index-unsafe 2) (:vector-set 3)
+    (:vector-length 1)
     (:elements-length 1) (:elements-index 2) (:elements-set 3)
     (:elements-ref 2) (:elements-slice 3))
   "The operations of the prelude: the arity of each, and the size class of what it allocates.")
@@ -154,7 +157,14 @@ reaches, and its root."
     (coalton/cell:new . :cell-new)
     (coalton/cell:read . :cell-read)
     (coalton/cell:write! . :cell-write)
-    (coalton/cell:swap! . :cell-swap)))
+    (coalton/cell:swap! . :cell-swap)
+    (coalton/vector:new . :vector-new)
+    (coalton/vector:push! . :vector-push)
+    (coalton/vector:pop! . :vector-pop)
+    (coalton/vector:index . :vector-index)
+    (coalton/vector:index-unsafe . :vector-index-unsafe)
+    (coalton/vector:set! . :vector-set)
+    (coalton/vector:length . :vector-length)))
 
 (defparameter *prelude-classes*
   '((sheaf/prelude/fixed:extent :fixed-new)
@@ -218,8 +228,8 @@ method in the order the class declares them.")
          :chain (and *def* (list (list (car *def*) (cdr *def*) *location*)))))
 
 (defparameter *opaque-types*
-  '(coalton/vector:vector coalton/hashtable:hashtable)
-  "Types that are references to mutable storage, whose meaning is open (#29, #30).")
+  '(coalton/hashtable:hashtable)
+  "Types that are references to mutable storage, whose meaning is open (#30).")
 
 (defun prelude-class (type)
   "How the array TYPE is sized: `:fixed`, `:variable`, `:grow` or `:grow-shrink`."
@@ -253,7 +263,11 @@ method in the order the class declares them.")
              (when (eq kind :data)
                (push (cons ir-type type) *pending-types*))
              ir-type))))
-    ((or tc:tyvar tc:function-ty tc:result-ty)
+    (tc:result-ty
+     (if (tc:result-ty-output-types type)
+         (lowering-error "the type ~a" (tc:type-to-string type))
+         (lower-type tc:*unit-type*)))
+    ((or tc:tyvar tc:function-ty)
      (lowering-error "the type ~a" (tc:type-to-string type)))))
 
 (defun instance-fields (constructor type)

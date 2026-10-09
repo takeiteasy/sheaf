@@ -147,21 +147,21 @@
       (is (= 4 (length (reached "FILLED"))))
       (is (= 2 (length (reached "PAIR")))))))
 
-;;; Growable locals of the opaque Vector type, built by hand
+;;; Growable locals of the opaque Hashtable type, built by hand
 
-(defvar *vector* (sheaf::make-ir-type :vector :reference 'coalton/vector:vector '()))
+(defvar *hashtable* (sheaf::make-ir-type :hashtable :reference 'coalton/hashtable:hashtable '()))
 (defvar *number* (sheaf::make-ir-type :number :scalar 'coalton:ufix '()))
 
 (defun hand-built (root-result body-fn)
-  "A program whose `make` returns a Vector and whose root is `main`, with the
+  "A program whose `make` returns a Hashtable and whose root is `main`, with the
 body BODY-FN builds from a function that makes a call of `make`."
   (let ((lowered (sheaf::%make-lowered :root 'main)))
     (flet ((make-call ()
-             (sheaf::make-ir-call :function 'make :args '() :type *vector*))
+             (sheaf::make-ir-call :function 'make :args '() :type *hashtable*))
            (def (name result body)
              (setf (gethash name (sheaf:lowered-defs lowered))
                    (sheaf::make-ir-def name nil :function '() result body nil))))
-      (def 'make *vector* (sheaf::make-ir-foreign :vars '() :form nil :type *vector*))
+      (def 'make *hashtable* (sheaf::make-ir-foreign :vars '() :form nil :type *hashtable*))
       (def 'main root-result (funcall body-fn #'make-call)))
     (sheaf:assign-stacks lowered)))
 
@@ -201,11 +201,11 @@ body BODY-FN builds from a function that makes a call of `make`."
     (is (= 1 (sheaf:lowered-stack-count assigned)))))
 
 (test a-returned-growable-value-is-built-in-the-destination
-  (let* ((assigned (hand-built *vector*
+  (let* ((assigned (hand-built *hashtable*
                                (lambda (make-call)
                                  (sheaf::make-ir-let
-                                  :name 'v :value (funcall make-call) :type *vector*
-                                  :body (sheaf::make-ir-local :name 'v :type *vector*)))))
+                                  :name 'v :value (funcall make-call) :type *hashtable*
+                                  :body (sheaf::make-ir-local :name 'v :type *hashtable*)))))
          (body (root-body assigned)))
     (is (null (sheaf:ir-let-stack body)))
     (is (= (sheaf:ir-def-destination (gethash (sheaf:lowered-root assigned) (sheaf:lowered-defs assigned)))

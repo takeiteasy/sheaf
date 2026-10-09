@@ -286,6 +286,7 @@ and RET shapes; a value has just RET."
                           (list (ast:node-let-subexpr node))))
     (ast:node-bind (list (ast:node-bind-expr node) (ast:node-bind-body node)))
     (ast:node-seq (ast:node-seq-nodes node))
+    (ast:node-values (ast:node-values-nodes node))
     (ast:node-locally (list (ast:node-locally-subexpr node)))
     (ast:node-match (cons (ast:node-match-expr node)
                           (mapcar #'match-branch-body-of (ast:node-match-branches node))))
@@ -416,6 +417,8 @@ its sets are then free to differ per use."
     (ast:node-seq (let ((shape nil))
                     (dolist (child (ast:node-seq-nodes node) shape)
                       (setf shape (infer child env)))))
+    (ast:node-values (dolist (child (ast:node-values-nodes node) (shape-of (ast:node-type node)))
+                       (infer child env)))
     (ast:node-locally (infer (ast:node-locally-subexpr node) env))
     (ast:node-match (infer-match node env))
     (ast:node-lisp (infer-lisp node env))
@@ -1252,6 +1255,9 @@ FN is evaluated before ARGS, as in the call it replaces."
       (ast:node-seq
        (ast:make-node-seq :type (funcall ty) :location location
                           :nodes (mapcar #'rewrite (ast:node-seq-nodes node))))
+      (ast:node-values
+       (ast:make-node-values :type (funcall ty) :location location
+                             :nodes (mapcar #'rewrite (ast:node-values-nodes node))))
       (ast:node-locally
        (ast:make-node-locally :type (funcall ty) :location location
                               :noinline-functions (ast:node-locally-noinline-functions node)

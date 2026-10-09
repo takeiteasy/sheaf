@@ -44,14 +44,43 @@
 (test arrays-lower-to-primitives
   (is (zerop (count-ir (lowered "arrays") 'sheaf:ir-foreign)))
   (is (zerop (count-ir (lowered "cells") 'sheaf:ir-foreign)))
+  (is (zerop (count-ir (lowered "vectors") 'sheaf:ir-foreign)))
   (is (equal (sort (mapcar #'first sheaf::*prelude-ops*) #'string<)
-             (prelude-ops-used "arrays" "cells"))))
+             (prelude-ops-used "arrays" "cells" "vectors"))))
 
 (test cells-give-one-result-on-every-tier
   (let ((expected (run-on-sbcl "cells")))
     (is (= 29 expected))
     (is (= expected (sheaf:run-lowered (lowered "cells"))))
     (is (= expected (sheaf:run-lowered (assigned "cells"))))))
+
+(test vectors-give-one-result-on-every-tier
+  (let ((expected (run-on-sbcl "vectors")))
+    (is (= 53 expected))
+    (is (= expected (sheaf:run-lowered (lowered "vectors"))))
+    (is (= expected (sheaf:run-lowered (assigned "vectors"))))))
+
+(test vectors-are-well-formed
+  (is-true (sheaf:check-lowered (lowered "vectors"))))
+
+(test a-returned-vector-is-built-in-the-destination
+  (let ((clone (first (clones "vectors" "FILLED"))))
+    (is (integerp (sheaf:ir-def-destination clone)))
+    (dolist (node (allocating-prims-of clone))
+      (is (eql (sheaf:ir-def-destination clone) (sheaf:ir-prim-stack node))))))
+
+(test a-vector-local-owns-its-stack
+  (let ((total (first (clones "vectors" "LOCAL-TOTAL"))) (seen 0))
+    (sheaf:walk-ir (lambda (node)
+                     (when (and (typep node 'sheaf:ir-let)
+                                (typep (sheaf:ir-let-value node) 'sheaf:ir-prim)
+                                (eq :vector-new (sheaf:ir-prim-op (sheaf:ir-let-value node))))
+                       (incf seen)
+                       (is (integerp (sheaf:ir-let-stack node)))
+                       (is (= (sheaf:ir-let-stack node)
+                              (sheaf:ir-prim-stack (sheaf:ir-let-value node))))))
+                   (sheaf:ir-def-body total))
+    (is (= 1 seen))))
 
 (test a-returned-cell-is-built-in-the-destination
   (let ((clone (first (clones "cells" "FRESH-CELL"))))

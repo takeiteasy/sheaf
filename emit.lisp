@@ -63,7 +63,7 @@
     (:scalar (if (ufix-type-p type)
                  "uint64_t"
                  (emit-error "the type ~a: https://todo.sr.ht/~~takeiteasy/sheaf/23" (type-text type))))
-    (:reference (emit-error "the reference type ~a: https://todo.sr.ht/~~takeiteasy/sheaf/8"
+    (:reference (emit-error "the reference type ~a: https://todo.sr.ht/~~takeiteasy/sheaf/30"
                             (type-text type)))
     ((:storage :view) (emit-error "the array or reference type ~a: https://todo.sr.ht/~~takeiteasy/sheaf/27"
                                   (type-text type)))
