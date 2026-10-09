@@ -1,7 +1,8 @@
 # sheaf
 
-> **Work in progress.** The design is settled in outline; only the first
-> stages of the compiler exist.
+> **Work in progress.** Programs compile from Coalton to C today, but only
+> for `UFix` and the data built from it. [STATUS.md](docs/STATUS.md) lists
+> what runs.
 
 **S**tatic **H**eapless **E**xpressions **A**s **F**orms. Sheaf is a
 statically typed Lisp with no heap and no garbage collector. It uses
@@ -35,6 +36,8 @@ git clone --recursive git@github.com:takeiteasy/sheaf.git
 cd sheaf
 make test
 ```
+
+[TESTING.md](docs/TESTING.md) covers the tests and CI.
 
 ## License
 
