@@ -119,8 +119,7 @@ freed.
 ## Limitations
 
 - In C a bank holds about 32,000 growable values at a time
-  ([EMITTER.md](EMITTER.md#banks)), and its freed slices stay committed:
-  [#36](https://todo.sr.ht/~takeiteasy/sheaf/36).
+  ([EMITTER.md](EMITTER.md#banks)).
 - A cycle keeps what it allocates until the call into it returns:
   [#11](https://todo.sr.ht/~takeiteasy/sheaf/11).
 - A growable local live across a call back into its own cycle is an error.
