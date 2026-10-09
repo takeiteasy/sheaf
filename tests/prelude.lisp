@@ -68,11 +68,12 @@
 (test vectors-are-well-formed
   (is-true (sheaf:check-lowered (lowered "vectors"))))
 
-(test a-returned-vector-is-built-in-the-destination
+(test a-returned-vector-is-built-on-a-growable-stack-of-the-caller
   (let ((clone (first (clones "vectors" "FILLED"))))
-    (is (integerp (sheaf:ir-def-destination clone)))
+    (is (null (sheaf:ir-def-destination clone)))
+    (is (= 1 (length (sheaf:ir-def-growables clone))))
     (dolist (node (allocating-prims-of clone))
-      (is (eql (sheaf:ir-def-destination clone) (sheaf:ir-prim-stack node))))))
+      (is (eql (first (sheaf:ir-def-growables clone)) (sheaf:ir-prim-stack node))))))
 
 (test a-vector-local-owns-its-stack
   (let ((total (first (clones "vectors" "LOCAL-TOTAL"))) (seen 0))
@@ -81,9 +82,8 @@
                                 (typep (sheaf:ir-let-value node) 'sheaf:ir-prim)
                                 (eq :vector-new (sheaf:ir-prim-op (sheaf:ir-let-value node))))
                        (incf seen)
-                       (is (integerp (sheaf:ir-let-stack node)))
-                       (is (= (sheaf:ir-let-stack node)
-                              (sheaf:ir-prim-stack (sheaf:ir-let-value node))))))
+                       (is (equal (list (sheaf:ir-prim-stack (sheaf:ir-let-value node)))
+                                  (sheaf:ir-let-stacks node)))))
                    (sheaf:ir-def-body total))
     (is (= 1 seen))))
 
@@ -107,11 +107,12 @@
 (test hashtables-are-well-formed
   (is-true (sheaf:check-lowered (lowered "hashtables"))))
 
-(test a-returned-hashtable-is-built-in-the-destination
+(test a-returned-hashtable-is-built-on-a-growable-stack-of-the-caller
   (let ((clone (first (clones "hashtables" "FILLED"))))
-    (is (integerp (sheaf:ir-def-destination clone)))
+    (is (null (sheaf:ir-def-destination clone)))
+    (is (= 1 (length (sheaf:ir-def-growables clone))))
     (dolist (node (allocating-prims-of clone))
-      (is (eql (sheaf:ir-def-destination clone) (sheaf:ir-prim-stack node))))))
+      (is (eql (first (sheaf:ir-def-growables clone)) (sheaf:ir-prim-stack node))))))
 
 (test a-hashtable-local-owns-its-stack
   (let ((total (first (clones "hashtables" "LOCAL-TOTAL"))) (seen 0))
@@ -120,9 +121,8 @@
                                 (typep (sheaf:ir-let-value node) 'sheaf:ir-prim)
                                 (eq :hashtable-new (sheaf:ir-prim-op (sheaf:ir-let-value node))))
                        (incf seen)
-                       (is (integerp (sheaf:ir-let-stack node)))
-                       (is (= (sheaf:ir-let-stack node)
-                              (sheaf:ir-prim-stack (sheaf:ir-let-value node))))))
+                       (is (equal (list (sheaf:ir-prim-stack (sheaf:ir-let-value node)))
+                                  (sheaf:ir-let-stacks node)))))
                    (sheaf:ir-def-body total))
     (is (= 1 seen))))
 
@@ -168,9 +168,8 @@
                      (when (and (typep node 'sheaf:ir-let)
                                 (typep (sheaf:ir-let-value node) 'sheaf:ir-prim)
                                 (eq :grow-new (sheaf:ir-prim-op (sheaf:ir-let-value node))))
-                       (is (integerp (sheaf:ir-let-stack node)))
-                       (is (= (sheaf:ir-let-stack node)
-                              (sheaf:ir-prim-stack (sheaf:ir-let-value node))))))
+                       (is (equal (list (sheaf:ir-prim-stack (sheaf:ir-let-value node)))
+                                  (sheaf:ir-let-stacks node)))))
                    (sheaf:ir-def-body grown))))
 
 (test a-fixed-array-reads-its-length-from-its-type

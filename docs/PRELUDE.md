@@ -62,9 +62,10 @@ Arrays are shared, not copied, when bound to another name.
 
 An array is built like any other storage ([STACKS.md](STACKS.md)): in the
 caller's destination when it may reach the result, otherwise in the
-function's pool. A `GrowArray`, `Stack`, `Vector` or `HashTable` bound by a `let` owns a stack for that
-`let`, and the interpreter checks it is on top of the stack when it
-grows.
+function's pool. A `GrowArray`, `Stack`, `Vector` or `HashTable` has a stack of
+its own: its caller gives the function one for each it returns, and a `let`
+that binds one owns one. The interpreter checks the value is on top of its
+stack when it grows.
 
 ## Limitations
 
@@ -77,8 +78,8 @@ grows.
 - `Vector` and `HashTable` functions other than the ones above, such as
   `entries`, `keys` and `extend!`, hold raw Lisp:
   [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
-- A returned `GrowArray`, `Vector` or `HashTable` built in a destination is not guaranteed to stay on
-  top of its stack: [#24](https://todo.sr.ht/~takeiteasy/sheaf/24).
+- A recursive cycle that builds a `GrowArray`, `Stack`, `Vector` or `HashTable`
+  at every level is an error: [#31](https://todo.sr.ht/~takeiteasy/sheaf/31).
 
 [^len]: A `FixedArray` length is read from the type after monomorphization,
     through a table `define-length` fills. The `Extent` class that

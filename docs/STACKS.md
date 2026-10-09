@@ -2,7 +2,7 @@
 
 `assign-stacks` gives every cell and growable value in a lowered program a data
 stack, after Goose's recipe[^recipe]. Stacks are reused once their owner's scope
-ends, and a returned value is built in its caller's destination.
+ends, and a returned value is built on stacks its caller gives the function.
 
 ```lisp
 (let* ((ir (sheaf:lower (sheaf:defunctionalize (sheaf:monomorphize program 'my-package::main))))
@@ -17,9 +17,10 @@ ends, and a returned value is built in its caller's destination.
 |---|---|
 | A cell the result holds | The function's destination, chosen by its caller |
 | Any other cell | The function's own pool, taken on entry and freed on exit |
-| A call's result | Nowhere if the callee builds no storage in its destination; otherwise like a cell |
-| An array | By its size class: a growable as below, any other like a cell |
-| A growable local | A stack of its own for the rest of its `let`; a returned one uses the destination |
+| A call's result | Like a cell for what it builds in its destination, and a stack of its own for each growable value it returns |
+| An array | By its size class[^class]: a growable as below, any other like a cell |
+| A growable value the result holds | One of the function's growable stacks, one for each such value, chosen by its caller |
+| A growable local | A stack of its own for the rest of its `let` |
 
 The result holds a cell when its roots reach it[^reach]: directly, through the
 fields of another cell, or through a value stored into an array or `Cell`
@@ -35,15 +36,31 @@ Both calls in `twice` reach the same clone of `dropped`, so the pool takes the
 same index twice. A stack index is the lowest one not in use where the value is
 built.
 
+A growable value stays on top of its stack so it can grow, so each one a result
+holds gets a stack of its own[^count]:
+
+```lisp
+(define (two n)                                  ; two growable stacks, no destination
+  (let ((a (vector:new)) (b (vector:new)))
+    (vector:push! n a)
+    (vector:push! n b)
+    (Tuple a b)))
+(define (with-list n)                            ; a destination and one growable stack
+  (let ((v (vector:new)))
+    (vector:push! n v)
+    (Tuple v (Cons n Nil))))
+```
+
 ## Contexts
 
 A def is cloned for each context it is called in: the destination of its
-result, the stacks in use on entry, and for a recursive cycle the region it
-allocates in. Every index is then a constant, and a clone's name shows its
-context.
+result, the stacks of its growable values, the stacks in use on entry, and for
+a recursive cycle the region it allocates in. Every index is then a constant,
+and a clone's name shows its context.
 
 ```text
 PAIR<UFIX * UFIX → LIST UFIX>{9}[dest 2 busy 0 1 2]
+TWO<UFIX → TUPLE (VECTOR UFIX) (VECTOR UFIX)>{16}[grow 1 2 busy 0 1 2]
 ```
 
 ## Recursive cycles
@@ -57,12 +74,14 @@ that call takes for itself when the result holds no storage[^region].
 | Slot | Holds |
 |---|---|
 | `ir-construct-stack` | The stack a cell is pushed to |
-| `ir-call-destination` | The stack a storage-holding result is built on |
+| `ir-call-destination` | The stack the cells and arrays of a result are built on |
+| `ir-call-growables` | The stacks the growable values of a result are built on |
 | `ir-call-region` | A region the call takes and frees |
-| `ir-let-stack` | The stack a growable local owns |
+| `ir-let-stacks` | The stacks the growable values a `let` binds own |
 | `ir-prim-stack` | The stack an array is pushed to |
 | `ir-def-pool` | The pool a clone owns |
-| `ir-def-destination` | The destination a clone's result is built on |
+| `ir-def-destination` | The destination a clone's cells and arrays are built on |
+| `ir-def-growables` | The stacks a clone's growable values are built on |
 | `ir-def-source` | The def a clone was cloned from |
 | `lowered-stack-count` | The number of stacks the program needs |
 
@@ -73,7 +92,8 @@ freed.
 
 ## Limitations
 
-- Size classes are provisional: [#24](https://todo.sr.ht/~takeiteasy/sheaf/24).
+- A recursive cycle that builds a growable value at every level is an error:
+  [#31](https://todo.sr.ht/~takeiteasy/sheaf/31).
 - A cycle keeps what it allocates until the call into it returns:
   [#11](https://todo.sr.ht/~takeiteasy/sheaf/11).
 - A growable local live across a call back into its own cycle is an error.
@@ -84,5 +104,12 @@ freed.
     program root checking rejects still gets stacks. A function builds in its
     destination when its summary's result holds `:fresh`, and
     `root-summary-reached` names the locals that go there.
+[^class]: `size-class` is `:fixed`, `:variable` or `:resizable`. The prelude
+    types name theirs in `*prelude-types*` (prelude-ops.lisp), and any other
+    type is `:fixed`.
+[^count]: `compute-placements` counts the stacks a def's result needs, one for
+    each growable site that reaches it and the callee's count for each call.
+    Branches share stacks. A recursive cycle repeats until its counts stop
+    changing.
 [^region]: A cycle of functions whose results hold no storage and that build
     none takes no region.

@@ -39,8 +39,8 @@
 (defstruct (ir-literal (:include ir-node)) value)
 (defstruct (ir-local (:include ir-node)) name)
 (defstruct (ir-global (:include ir-node)) name)
-(defstruct (ir-let (:include ir-node)) name value body (stack nil))
-(defstruct (ir-call (:include ir-node)) function args (destination nil) (region nil))
+(defstruct (ir-let (:include ir-node)) name value body (stacks '()))
+(defstruct (ir-call (:include ir-node)) function args (destination nil) (growables '()) (region nil))
 (defstruct (ir-construct (:include ir-node)) constructor args (stack nil))
 (defstruct (ir-prim (:include ir-node)) op args (stack nil))
 (defstruct (ir-foreign (:include ir-node)) vars form)
@@ -61,10 +61,10 @@
 
 (defstruct (ir-def (:constructor make-ir-def (name origin kind params result body location)))
   "A global. A `:function` has parameters, each a name and a type; a `:value`
-has none. Stack assignment clones a def per context and fills the last three
+has none. Stack assignment clones a def per context and fills the last four
 slots."
   name origin kind params result body location
-  (source nil) (destination nil) (pool nil))
+  (source nil) (destination nil) (growables '()) (pool nil))
 
 (defstruct (lowered (:constructor %make-lowered))
   "A program in Sheaf's IR: its globals, the constructors of every data type it
@@ -136,8 +136,8 @@ reaches, and its root."
   (and (assoc op *prelude-ops*) t))
 
 (defun primitive-allocates (op)
-  "The size class of what the primitive OP allocates, or NIL."
-  (third (assoc op *prelude-ops*)))
+  "Whether the primitive OP allocates storage."
+  (and (third (assoc op *prelude-ops*)) t))
 
 ;;; Lowering
 
@@ -151,10 +151,6 @@ reaches, and its root."
   (error 'specialization-error
          :message (format nil "Lowering does not support ~?" control args)
          :chain (and *def* (list (list (car *def*) (cdr *def*) *location*)))))
-
-(defun prelude-class (type)
-  "How the array TYPE is sized: `:fixed`, `:variable`, `:grow` or `:grow-shrink`."
-  (third (assoc (ir-type-name type) *prelude-types*)))
 
 (defun fixed-length (type)
   "The length of the fixed array TYPE."

@@ -11,11 +11,11 @@
 (defstruct (root-summary (:constructor make-root-summary (&key result stores locals reached)))
   "What a def does with the roots of its arguments. RESULT lists what its result
 may point into: a parameter index, `:global`, or `:fresh` for storage it builds
-in its caller's destination. STORES lists the stores it leaves its caller to
+in its caller's destinations. STORES lists the stores it leaves its caller to
 check, each a parameter index, the parameter index or `:global` it is stored
 into, and the chain of places that justifies it. LOCALS maps each name to its
 roots. REACHED lists the locals whose storage the result holds, which are built
-in the caller's destination."
+in the caller's destinations."
   (result '()) (stores '()) (locals nil) (reached '()))
 
 ;; op, how it treats roots, and the arguments it uses
@@ -260,9 +260,9 @@ is true a store that no caller could make safe is an error."
                       (and (holds-storage-p (ir-def-result def)) reached)))
              (result '()))
         ;; Stack assignment builds every local in REACHED in the caller's
-        ;; destination, so the rules below are stricter than it needs.
+        ;; destinations, so the rules below are stricter than it needs.
         ;; TODO: reject only what stack assignment does not place in the
-        ;; destination.
+        ;; destinations.
         ;; https://todo.sr.ht/~takeiteasy/sheaf/28
         (dolist (root (closure roots (list links)))
           (cond ((integerp root) (pushnew root result))

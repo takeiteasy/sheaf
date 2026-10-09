@@ -65,10 +65,10 @@ check the stores it leaves for them.
 
 | Slot | Holds |
 |---|---|
-| `root-summary-result` | What the result may point into: parameter numbers, `:global`, `:fresh` for storage built in the caller's destination |
+| `root-summary-result` | What the result may point into: parameter numbers, `:global`, `:fresh` for storage built in the caller's destinations |
 | `root-summary-stores` | Each store the function makes of one parameter into another or into a global |
 | `root-summary-locals` | The roots of every name in the function |
-| `root-summary-reached` | The locals whose storage the result holds, which stack assignment builds in the caller's destination |
+| `root-summary-reached` | The locals whose storage the result holds, which stack assignment builds in the caller's destinations |
 
 ```lisp
 (define (put a r) (arr:set! a 0 r))   ; stores parameter 1 into parameter 0
@@ -80,7 +80,7 @@ errors.
 ## Returning storage
 
 A function may return a reference into an array it builds: the array is built
-in the caller's destination ([STACKS.md](STACKS.md)). A returned array may not
+in the caller's destinations ([STACKS.md](STACKS.md)). A returned array may not
 hold a reference into another local. A list or other cell may.
 
 ## Limitations

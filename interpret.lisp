@@ -260,11 +260,11 @@ the run touched when the program has a stack assignment."
                  (ir-local (cdr (assoc (ir-local-name node) env)))
                  (ir-global (force (ir-global-name node)))
                  (ir-let
-                  (let ((stack (ir-let-stack node)))
-                    (when stack (claim stack))
+                  (let ((stacks (ir-let-stacks node)))
+                    (mapc #'claim stacks)
                     (prog1 (evaluate (ir-let-body node)
                                      (acons (ir-let-name node) (evaluate (ir-let-value node) env) env))
-                      (when stack (release stack)))))
+                      (mapc #'release stacks))))
                  (ir-call
                   (let* ((def (global (ir-call-function node)))
                          (env (loop :for (name) :in (ir-def-params def)
@@ -299,9 +299,10 @@ the run touched when the program has a stack assignment."
         (when stacks
           (maphash (lambda (name def)
                      (declare (ignore name))
-                     (when (and (ir-def-destination def)
-                                (or (eq (ir-def-kind def) :value) (eq def root)))
-                       (claim (ir-def-destination def))))
+                     (when (or (eq (ir-def-kind def) :value) (eq def root))
+                       (when (ir-def-destination def)
+                         (claim (ir-def-destination def)))
+                       (mapc #'claim (ir-def-growables def))))
                    defs)
           (maphash (lambda (name def)
                      (when (eq (ir-def-kind def) :value) (force name)))

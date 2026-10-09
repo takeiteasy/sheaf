@@ -180,9 +180,9 @@ body BODY-FN builds from a function that makes a call of `make`."
                                         :name 'w :value (funcall make-call) :type *number*
                                         :body (zero)))))))
     (let* ((outer (root-body assigned)) (inner (sheaf:ir-let-body outer)))
-      (is (= 0 (sheaf:ir-let-stack outer)))
-      (is (= 1 (sheaf:ir-let-stack inner)))
-      (is (= 0 (sheaf:ir-call-destination (sheaf:ir-let-value outer))))
+      (is (equal '(0) (sheaf:ir-let-stacks outer)))
+      (is (equal '(1) (sheaf:ir-let-stacks inner)))
+      (is (equal '(0) (sheaf:ir-call-growables (sheaf:ir-let-value outer))))
       (is (= 2 (sheaf:lowered-stack-count assigned))))))
 
 (test growable-locals-in-different-branches-share-a-stack
@@ -196,20 +196,22 @@ body BODY-FN builds from a function that makes a call of `make`."
                                                          :type *number* :body (zero)))))
                        (sheaf::make-ir-match :scrutinee (zero) :type *number*
                                              :branches (list (branch) (branch))))))))
-    (is (equal '(0 0) (mapcar (lambda (branch) (sheaf:ir-let-stack (sheaf:ir-branch-body branch)))
+    (is (equal '((0) (0)) (mapcar (lambda (branch) (sheaf:ir-let-stacks (sheaf:ir-branch-body branch)))
                               (sheaf:ir-match-branches (root-body assigned)))))
     (is (= 1 (sheaf:lowered-stack-count assigned)))))
 
-(test a-returned-growable-value-is-built-in-the-destination
+(test a-returned-growable-value-is-built-on-a-growable-stack-of-the-caller
   (let* ((assigned (hand-built *growable*
                                (lambda (make-call)
                                  (sheaf::make-ir-let
                                   :name 'v :value (funcall make-call) :type *growable*
                                   :body (sheaf::make-ir-local :name 'v :type *growable*)))))
          (body (root-body assigned)))
-    (is (null (sheaf:ir-let-stack body)))
-    (is (= (sheaf:ir-def-destination (gethash (sheaf:lowered-root assigned) (sheaf:lowered-defs assigned)))
-           (sheaf:ir-call-destination (sheaf:ir-let-value body))))))
+    (is (null (sheaf:ir-let-stacks body)))
+    (is (null (sheaf:ir-call-destination (sheaf:ir-let-value body))))
+    (is (= 1 (length (sheaf:ir-call-growables (sheaf:ir-let-value body)))))
+    (is (equal (sheaf:ir-def-growables (gethash (sheaf:lowered-root assigned) (sheaf:lowered-defs assigned)))
+               (sheaf:ir-call-growables (sheaf:ir-let-value body))))))
 
 (defun leaking (owner)
   "A program whose `leak` builds a list in the pool of OWNER, `leak` or `main`."
@@ -247,3 +249,77 @@ body BODY-FN builds from a function that makes a call of `make`."
 (test a-cell-outliving-its-stack-is-caught
   (is (= 0 (sheaf:run-lowered (leaking :main))))
   (signals error (sheaf:run-lowered (leaking :leak))))
+
+;;; Growable values a result holds
+
+(defun growable-stacks-of (def)
+  (sort (copy-list (sheaf:ir-def-growables def)) #'<))
+
+(defun prim-stacks-of (def)
+  (sort (mapcar #'sheaf:ir-prim-stack (allocating-prims-of def)) #'<))
+
+(test growables-give-one-result-on-every-tier
+  (let ((expected (run-on-sbcl "growables")))
+    (is (= 20 expected))
+    (is (= expected (sheaf:run-lowered (lowered "growables"))))
+    (is (= expected (sheaf:run-lowered (assigned "growables"))))))
+
+(test growables-are-well-formed-and-count-the-stacks-a-run-touches
+  (let ((assigned (assigned "growables")))
+    (is-true (sheaf:check-assigned assigned))
+    (is-true (sheaf:check-lowered assigned))
+    (is (= (sheaf:lowered-stack-count assigned) (nth-value 1 (sheaf:run-lowered assigned))))))
+
+(test each-vector-a-result-holds-has-a-stack-of-its-own
+  (dolist (two (clones "growables" "TWO"))
+    (is (null (sheaf:ir-def-destination two)))
+    (is (= 2 (length (remove-duplicates (sheaf:ir-def-growables two)))))
+    (is (equal (growable-stacks-of two) (prim-stacks-of two)))))
+
+(test a-vector-and-a-list-a-result-holds-are-on-different-stacks
+  (dolist (pair (clones "growables" "WITH-LIST"))
+    (let ((destination (sheaf:ir-def-destination pair)))
+      (is (integerp destination))
+      (is (= 1 (length (sheaf:ir-def-growables pair))))
+      (is (not (member destination (sheaf:ir-def-growables pair))))
+      (is (equal (sheaf:ir-def-growables pair) (prim-stacks-of pair)))
+      (let ((cells (remove-if-not #'sheaf:ir-construct-stack (constructs pair))))
+        (is (= 3 (length cells)))
+        (dolist (cell cells)
+          (is (eql destination (sheaf:ir-construct-stack cell))))))))
+
+(test branches-share-a-growable-stack
+  (dolist (either (clones "growables" "EITHER"))
+    (is (= 1 (length (sheaf:ir-def-growables either))))
+    (is (= 2 (length (allocating-prims-of either))))
+    (is (equal (sheaf:ir-def-growables either) (remove-duplicates (prim-stacks-of either))))))
+
+(test a-tail-call-passes-its-growable-stacks-on
+  (dolist (relay (clones "growables" "RELAY-TWO"))
+    (is (= 2 (length (sheaf:ir-def-growables relay))))
+    (is (equal (sheaf:ir-def-growables relay)
+               (sheaf:ir-call-growables (first (calls relay)))))))
+
+(test a-dropped-call-owns-a-stack-for-each-growable-it-builds
+  (let* ((main (first (clones "growables" "MAIN-TWO"))) (found nil))
+    (sheaf:walk-ir (lambda (node)
+                     (when (and (typep node 'sheaf:ir-let) (typep (sheaf:ir-let-value node) 'sheaf:ir-call))
+                       (setf found node)))
+                   (sheaf:ir-def-body main))
+    (is (= 2 (length (sheaf:ir-let-stacks found))))
+    (is (null (sheaf:ir-call-destination (sheaf:ir-let-value found))))
+    (is (equal (sheaf:ir-let-stacks found) (sheaf:ir-call-growables (sheaf:ir-let-value found))))))
+
+(test a-recursive-builder-of-one-growable-reuses-its-clone
+  (dolist (down (clones "growables" "FILLED-DOWN"))
+    (is (= 1 (length (sheaf:ir-def-growables down))))
+    (is (eq (sheaf:ir-def-name down) (sheaf:ir-call-function (first (calls down)))))))
+
+(test a-growable-built-at-every-level-of-a-cycle-is-rejected
+  (is (search "sheaf/31"
+              (error-text (lambda () (sheaf:assign-stacks (lowered-from "growables" "VECTORS-DOWN")))))))
+
+(test size-classes-come-from-the-prelude-types
+  (is (eq :resizable (sheaf:size-class *growable*)))
+  (is (eq :variable (sheaf:size-class (sheaf::make-ir-type :array :storage 'sheaf/prelude:array (list *number*)))))
+  (is (eq :fixed (sheaf:size-class *number*))))

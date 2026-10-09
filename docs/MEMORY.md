@@ -39,7 +39,7 @@ never writes a lifetime.
 
 | Value | Built in |
 |---|---|
-| A function's result | The caller's destination |
+| A function's result | The caller's destinations: one for cells and arrays, one for each growable value |
 | Any other allocation | The current function's scope |
 
 A function returning a list builds that list straight into its caller's

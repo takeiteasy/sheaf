@@ -9,19 +9,19 @@
 (defparameter *prelude-types*
   '((sheaf/prelude:fixedarray :storage :fixed)
     (sheaf/prelude:array :storage :variable)
-    (sheaf/prelude:growarray :storage :grow)
-    (sheaf/prelude:stack :storage :grow-shrink)
+    (sheaf/prelude:growarray :storage :resizable)
+    (sheaf/prelude:stack :storage :resizable)
     (sheaf/prelude:slice :view)
     (sheaf/prelude:ref :view)
     (coalton/cell:cell :storage :fixed)
-    (coalton/vector:vector :storage :grow-shrink)
-    (coalton/hashtable:hashtable :storage :grow-shrink))
-  "The prelude's types: the kind of each, and for arrays how it is sized.")
+    (coalton/vector:vector :storage :resizable)
+    (coalton/hashtable:hashtable :storage :resizable))
+  "The prelude's types: the kind of each, and for storage its size class.")
 
 (defparameter *prelude-ops*
-  '((:fixed-new 1 :fixed) (:array-new 2 :variable) (:grow-new 0 :resizable) (:stack-new 0 :resizable)
-    (:cell-new 1 :fixed) (:vector-new 0 :resizable)
-    (:hashtable-new 0 :resizable) (:hashtable-with-capacity 1 :resizable)
+  '((:fixed-new 1 :allocates) (:array-new 2 :allocates) (:grow-new 0 :allocates) (:stack-new 0 :allocates)
+    (:cell-new 1 :allocates) (:vector-new 0 :allocates)
+    (:hashtable-new 0 :allocates) (:hashtable-with-capacity 1 :allocates)
     (:hashtable-get 2) (:hashtable-set 3) (:hashtable-remove 2) (:hashtable-count 1)
     (:grow-push 2) (:stack-push 2) (:stack-pop 1)
     (:ref-get 1) (:ref-set 2)
@@ -30,7 +30,7 @@
     (:vector-length 1)
     (:elements-length 1) (:elements-index 2) (:elements-set 3)
     (:elements-ref 2) (:elements-slice 3))
-  "The operations of the prelude: the arity of each, and the size class of what it allocates.")
+  "The operations of the prelude: the arity of each, and whether it allocates.")
 
 (defparameter *prelude-functions*
   '((sheaf/prelude/arr:new . :array-new)
