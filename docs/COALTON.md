@@ -17,7 +17,7 @@ branch `sheaf`: upstream Coalton plus Sheaf's patches.
 | Remote | Points at |
 |---|---|
 | `origin` | `takeiteasy/coalton` on GitHub |
-| `mirror` | `~takeiteasy/coalton` on sr.ht |
+| `mirror` | `takeiteasy/coalton` on a private mirror |
 | `upstream` | `coalton-lang/coalton` |
 
 ## Updating from upstream
