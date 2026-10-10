@@ -21,4 +21,4 @@ What runs today, checked by `make test` ([TESTING.md](TESTING.md)).
 
 Only `UFix` and the data types built from it reach C. Each stage's limitations
 are in [PIPELINE.md](PIPELINE.md) and the other docs' Limitations sections, and
-the [tracker](https://todo.sr.ht/~takeiteasy/sheaf) holds the work.
+the [issues](https://github.com/takeiteasy/sheaf/issues) hold the work.

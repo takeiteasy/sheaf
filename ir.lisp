@@ -29,7 +29,7 @@ binding it defines."
         ;; TODO: bindings compiled before capture, the Coalton stdlib among
         ;; them, only have the code Coalton stored after optimizing, which
         ;; inlines raw Lisp forms. Capture or replace the stdlib instead.
-        ;; https://todo.sr.ht/~takeiteasy/sheaf/12
+        ;; https://github.com/takeiteasy/sheaf/issues/3
         (values (tc:lookup-code entry:*global-environment* name :no-error t) nil))))
 
 (defun global-references (node)

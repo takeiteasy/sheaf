@@ -68,7 +68,7 @@ that owner took it, and the cells pushed since."
 
 (defun run-lowered (lowered)
   "Evaluate the root of LOWERED, a function of no arguments or a value. Raw Lisp
-cannot be evaluated: https://todo.sr.ht/~takeiteasy/sheaf/12
+cannot be evaluated: https://github.com/takeiteasy/sheaf/issues/3
 
 A program with a stack assignment also runs on simulated data stacks and signals
 an error on a stack with two owners, a cell pushed to a stack without one, or a

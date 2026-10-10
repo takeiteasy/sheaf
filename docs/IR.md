@@ -76,19 +76,19 @@ well. An allocating one holds the stack it pushes to in `ir-prim-stack`.
 ## Limitations
 
 - Raw Lisp in the standard library stays `ir-foreign`, which `run-lowered`
-  and the emitter reject: [#12](https://todo.sr.ht/~takeiteasy/sheaf/12),
-  [#16](https://todo.sr.ht/~takeiteasy/sheaf/16).
+  and the emitter reject: [#3](https://github.com/takeiteasy/sheaf/issues/3),
+  [#7](https://github.com/takeiteasy/sheaf/issues/7).
 - Other numeric types and operations are not primitives:
-  [#23](https://todo.sr.ht/~takeiteasy/sheaf/23).
+  [#12](https://github.com/takeiteasy/sheaf/issues/12).
 - A recursive `let` or the node kinds defunctionalization rejects are
-  errors: [#20](https://todo.sr.ht/~takeiteasy/sheaf/20).
+  errors: [#10](https://github.com/takeiteasy/sheaf/issues/10).
 - `Cell` functions other than `new`, `read`, `write!` and `swap!`, such as
   `update!`, hold raw Lisp, as do `Vector` functions other than `new`, `push!`,
   `pop!`, `index`, `index-unsafe`, `set!` and `length`, and `Hashtable`
   functions other than `new`, `with-capacity`, `get`, `set!`, `remove!` and
-  `count`: [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
+  `count`: [#3](https://github.com/takeiteasy/sheaf/issues/3).
 - `UFix` is unsigned 63-bit, and overflow is unspecified:
-  [#9](https://todo.sr.ht/~takeiteasy/sheaf/9).
+  [#1](https://github.com/takeiteasy/sheaf/issues/1).
 
 [^foreign]: The standard library mixes raw Lisp with Coalton's own runtime
     representations, such as `Optional` and `Cell`, so a fragment cannot run

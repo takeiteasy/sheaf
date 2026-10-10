@@ -121,9 +121,9 @@ the caller's destinations ([STACKS.md](STACKS.md)).
 
 - A call result has one root, so a reference into its cell part is rejected
   when its growable part is freed:
-  [#40](https://todo.sr.ht/~takeiteasy/sheaf/40).
+  [#16](https://github.com/takeiteasy/sheaf/issues/16).
 - The SBCL path does not run the check:
-  [#17](https://todo.sr.ht/~takeiteasy/sheaf/17).
+  [#8](https://github.com/takeiteasy/sheaf/issues/8).
 
 [^inexact]: A value read out of an array gets the roots of the array, which
     bound its lifetime without naming where it points. A reference read out of

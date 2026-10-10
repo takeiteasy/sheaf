@@ -294,7 +294,7 @@ and RET shapes; a value has just RET."
     (ast:node-match (cons (ast:node-match-expr node)
                           (mapcar #'match-branch-body-of (ast:node-match-branches node))))
     ;; TODO: only the node kinds the fixtures use; the rest signal an error.
-    ;; https://todo.sr.ht/~takeiteasy/sheaf/20
+    ;; https://github.com/takeiteasy/sheaf/issues/10
     (t (unsupported "~(~a~) nodes" (type-of node)))))
 
 (defun match-branch-body-of (branch)

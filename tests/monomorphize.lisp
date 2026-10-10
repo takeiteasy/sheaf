@@ -80,7 +80,7 @@
   (maphash (lambda (name node)
              (is-true (ast:node-location node) "~s has no location" name))
            (sheaf:specialized-bindings (specialized "poly")))
-  ;; Capture locates every match and literal; see #15 for the rest.
+  ;; Capture locates every match and literal; see #6 for the rest.
   (traverse:traverse
    (gethash (sheaf:specialized-root (specialized "poly"))
             (sheaf:specialized-bindings (specialized "poly")))

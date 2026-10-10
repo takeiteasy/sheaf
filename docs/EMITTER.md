@@ -102,19 +102,19 @@ A slice past either limit prints `bank space exhausted` or `a bank slice exhaust
 ## Limitations
 
 - Mutual tail calls grow the C stack:
-  [#14](https://todo.sr.ht/~takeiteasy/sheaf/14).
+  [#5](https://github.com/takeiteasy/sheaf/issues/5).
 - Exceptions, `unwind-protect` and restarts:
-  [#13](https://todo.sr.ht/~takeiteasy/sheaf/13).
-- Raw Lisp is an error: [#16](https://todo.sr.ht/~takeiteasy/sheaf/16),
-  [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
+  [#4](https://github.com/takeiteasy/sheaf/issues/4).
+- Raw Lisp is an error: [#7](https://github.com/takeiteasy/sheaf/issues/7),
+  [#3](https://github.com/takeiteasy/sheaf/issues/3).
 - `hashtable:count` returns an `Integer`, which is an emit error:
-  [#23](https://todo.sr.ht/~takeiteasy/sheaf/23). So is a `with-capacity` or
+  [#12](https://github.com/takeiteasy/sheaf/issues/12). So is a `with-capacity` or
   `make` whose capacity is not a literal.
 - Only `UFix` and the data types built from it are emitted:
-  [#23](https://todo.sr.ht/~takeiteasy/sheaf/23).
-- `UFix` arithmetic wraps at 64 bits: [#9](https://todo.sr.ht/~takeiteasy/sheaf/9).
+  [#12](https://github.com/takeiteasy/sheaf/issues/12).
+- `UFix` arithmetic wraps at 64 bits: [#1](https://github.com/takeiteasy/sheaf/issues/1).
 - Cells are linked by pointers, not relative references:
-  [#26](https://todo.sr.ht/~takeiteasy/sheaf/26).
+  [#13](https://github.com/takeiteasy/sheaf/issues/13).
 
 [^layout]: The elements follow the header at `offsetof(struct, e)`, so the first
     element is where the push started. `An`, `Gn` and `Sn` are shared by every

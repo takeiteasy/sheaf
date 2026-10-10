@@ -328,7 +328,7 @@ them out, the region its cycle allocates in, and the stacks in use on entry."
                        (ir-call-function copy)
                        (cond ((and callee-cycle (eq callee-cycle cycle))
                               (when (set-difference busy entry-busy)
-                                (error "~s keeps a growable local across a call back into its recursive cycle: https://todo.sr.ht/~~takeiteasy/sheaf/41"
+                                (error "~s keeps a growable local across a call back into its recursive cycle: https://github.com/takeiteasy/sheaf/issues/17"
                                        (ir-def-name def)))
                               (clone-def callee dest stacks call-bank region entry-busy))
                              (callee-cycle

@@ -82,7 +82,7 @@
   (ecase (ir-type-kind type)
     (:scalar (if (ufix-type-p type)
                  "uint64_t"
-                 (emit-error "the type ~a: https://todo.sr.ht/~~takeiteasy/sheaf/23" (type-text type))))
+                 (emit-error "the type ~a: https://github.com/takeiteasy/sheaf/issues/12" (type-text type))))
     ((:storage :view)
      (let ((layout (storage-layout type)))
        (case layout
@@ -155,7 +155,7 @@
 
 ;; TODO: the cells of a recursive type are linked by C pointers, where
 ;; docs/MEMORY.md describes relative references.
-;; https://todo.sr.ht/~takeiteasy/sheaf/26
+;; https://github.com/takeiteasy/sheaf/issues/13
 (defun member-access (access type member)
   (format nil (if (pooled-p type) "(~a)->~a" "(~a).~a") access member))
 
@@ -311,7 +311,7 @@ and return its C variable."
             (:hashtable-with-capacity
              (let ((hint (first (ir-prim-args node))))
                (unless (and (typep hint 'ir-literal) (integerp (ir-literal-value hint)) (<= 0 (ir-literal-value hint)))
-                 (emit-error "a hash table capacity that is not a literal: https://todo.sr.ht/~~takeiteasy/sheaf/23"))
+                 (emit-error "a hash table capacity that is not a literal: https://github.com/takeiteasy/sheaf/issues/12"))
                (new-table (format nil "UINT64_C(~d)" (ir-literal-value hint)))))
             (:hashtable-get
              (let ((found (fresh-c-name (make-symbol "FOUND"))))
@@ -349,7 +349,7 @@ and return its C variable."
           (:ufix-compare (format nil "(~a){ .tag = ~a < ~a ? ~d : ~a > ~a ? ~d : ~d }"
                                  (c-type type) a b (tag "LT") a b (tag "GT") (tag "EQ")))
           (:ordering-eq (boolean (format nil "~a.tag == ~a.tag" a b)))
-          (:ufix-from-int (emit-error "a conversion of a value that is not a literal: https://todo.sr.ht/~~takeiteasy/sheaf/9")))))))
+          (:ufix-from-int (emit-error "a conversion of a value that is not a literal: https://github.com/takeiteasy/sheaf/issues/1")))))))
 
 (defun construct-expr (node env)
   (let* ((type (ir-node-type node))
@@ -388,7 +388,7 @@ and return its C variable."
     (ir-prim (prim-expr node env))
     (ir-construct (construct-expr node env))
     (ir-call (call-expr node env))
-    (ir-foreign (emit-error "raw Lisp: https://todo.sr.ht/~~takeiteasy/sheaf/16"))))
+    (ir-foreign (emit-error "raw Lisp: https://github.com/takeiteasy/sheaf/issues/7"))))
 
 ;;; Statements
 

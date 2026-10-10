@@ -102,7 +102,7 @@ reaches, and its root."
 ;; TODO: only the UFix operations and Ordering equality that the fixtures reach
 ;; are primitive, and they are matched by the name of the instance method.
 ;; Cover the other numeric types and the rest of Num, Eq and Ord.
-;; https://todo.sr.ht/~takeiteasy/sheaf/23
+;; https://github.com/takeiteasy/sheaf/issues/12
 (defparameter *primitives*
   (let ((table (make-hash-table :test 'equal)))
     (loop :for (name op arity)
@@ -177,7 +177,7 @@ reaches, and its root."
                                (tc:type-to-string type)))
              (when (and (eq name 'coalton/hashtable:hashtable)
                         (not (eq (ir-type-name (first (ir-type-args ir-type))) 'coalton:ufix)))
-               (lowering-error "the hashtable key type ~a: https://todo.sr.ht/~~takeiteasy/sheaf/23"
+               (lowering-error "the hashtable key type ~a: https://github.com/takeiteasy/sheaf/issues/12"
                                (tc:type-to-string type)))
              (setf (gethash key *ir-types*) ir-type)
              (when (eq kind :data)

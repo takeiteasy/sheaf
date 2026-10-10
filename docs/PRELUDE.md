@@ -70,12 +70,12 @@ stack when it grows.
 ## Limitations
 
 - A `HashTable` key other than `UFix` is a lowering error:
-  [#23](https://todo.sr.ht/~takeiteasy/sheaf/23).
+  [#12](https://github.com/takeiteasy/sheaf/issues/12).
 - Elements other than `UFix` and the data types built from it have no
-  primitives: [#23](https://todo.sr.ht/~takeiteasy/sheaf/23).
+  primitives: [#12](https://github.com/takeiteasy/sheaf/issues/12).
 - `Vector` and `HashTable` functions other than the ones above, such as
   `entries`, `keys` and `extend!`, hold raw Lisp:
-  [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
+  [#3](https://github.com/takeiteasy/sheaf/issues/3).
 
 [^len]: A `FixedArray` length is read from the type after monomorphization,
     through a table `define-length` fills. The `Extent` class that

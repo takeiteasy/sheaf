@@ -45,16 +45,16 @@ that expands to it, such as `assert`.
 
 - Bindings compiled before capture, including all of Coalton's standard
   library, only have Coalton's optimized IR, which inlines raw Lisp:
-  [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
-- Some nodes have no location: [#15](https://todo.sr.ht/~takeiteasy/sheaf/15).
+  [#3](https://github.com/takeiteasy/sheaf/issues/3).
+- Some nodes have no location: [#6](https://github.com/takeiteasy/sheaf/issues/6).
 - Raw Lisp in user code, such as an `assert`, has no native translation:
-  [#16](https://todo.sr.ht/~takeiteasy/sheaf/16).
+  [#7](https://github.com/takeiteasy/sheaf/issues/7).
 - The SBCL path does not run Sheaf's checks yet:
-  [#17](https://todo.sr.ht/~takeiteasy/sheaf/17).
+  [#8](https://github.com/takeiteasy/sheaf/issues/8).
 - Exceptions and mutual tail calls in C:
-  [#13](https://todo.sr.ht/~takeiteasy/sheaf/13),
-  [#14](https://todo.sr.ht/~takeiteasy/sheaf/14).
-- `Integer` and overflow semantics: [#9](https://todo.sr.ht/~takeiteasy/sheaf/9).
+  [#4](https://github.com/takeiteasy/sheaf/issues/4),
+  [#5](https://github.com/takeiteasy/sheaf/issues/5).
+- `Integer` and overflow semantics: [#1](https://github.com/takeiteasy/sheaf/issues/1).
 
 [^loc]: Nodes returned by Coalton's `translate-expression` and every
     top-level binding have a location. Nodes a translation helper builds

@@ -475,7 +475,7 @@ dictionary arguments removed from every type."
             (when (member (cdr var) binders)
               ;; TODO: only optimized stdlib code passes dictionaries to raw
               ;; Lisp; capturing the stdlib removes this case.
-              ;; https://todo.sr.ht/~takeiteasy/sheaf/12
+              ;; https://github.com/takeiteasy/sheaf/issues/3
               (specialization-error (request-chain *current*)
                                     "Raw Lisp uses the dictionary ~s" (cdr var))))
           (values))

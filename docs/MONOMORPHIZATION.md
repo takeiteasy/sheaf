@@ -50,10 +50,10 @@ that led to them, each with its type and source location.
 
 - The standard library's code is Coalton's optimized IR, so specializations
   of it keep raw Lisp, and raw Lisp that uses a dictionary is an error:
-  [#12](https://todo.sr.ht/~takeiteasy/sheaf/12),
-  [#16](https://todo.sr.ht/~takeiteasy/sheaf/16).
+  [#3](https://github.com/takeiteasy/sheaf/issues/3),
+  [#7](https://github.com/takeiteasy/sheaf/issues/7).
 - Programs compiled for SBCL are not monomorphized, so a program can run there
-  and still be rejected here: [#17](https://todo.sr.ht/~takeiteasy/sheaf/17).
+  and still be rejected here: [#8](https://github.com/takeiteasy/sheaf/issues/8).
 
 [^limit]: `*specialization-limit*`, as in Goose. A local binding has the same
     limit on its clones.

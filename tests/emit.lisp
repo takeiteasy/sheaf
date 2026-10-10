@@ -88,7 +88,7 @@ and exit code."
       (is (= interpreted compiled) "~a" root))))
 
 (test a-hash-table-count-is-not-emitted-until-integers-are
-  (is (search "sheaf/23" (error-text (lambda () (sheaf:emit-c (sheaf:assign-stacks (lowered-from "hashtables" "COUNTED"))))))))
+  (is (search "sheaf/issues/12" (error-text (lambda () (sheaf:emit-c (sheaf:assign-stacks (lowered-from "hashtables" "COUNTED"))))))))
 
 (defparameter *small-banks* '("-DSHEAF_SLICE_SIZE=65536" "-DSHEAF_BANK_SPACE=524288")
   "Eight slices of bank space.")

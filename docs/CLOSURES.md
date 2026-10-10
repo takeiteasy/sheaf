@@ -74,16 +74,16 @@ of the construct.
 
 - A closure nested inside closures to a depth known only at runtime, such as
   an iterator rebuilt in a loop, is an error:
-  [#22](https://todo.sr.ht/~takeiteasy/sheaf/22).
+  [#11](https://github.com/takeiteasy/sheaf/issues/11).
 - A function value passed to a standard library function that has no captured
   code, such as the list `fold` reached through `map`, is an error:
-  [#12](https://todo.sr.ht/~takeiteasy/sheaf/12).
+  [#3](https://github.com/takeiteasy/sheaf/issues/3).
 - Partial application, keyword arguments, constructors used as functions and
   the `catch`, `for` and `values` forms are errors:
-  [#20](https://todo.sr.ht/~takeiteasy/sheaf/20).
+  [#10](https://github.com/takeiteasy/sheaf/issues/10).
 - A `Cell` captured by only one closure stays a separate value, not a field of
   that closure's case:
-  [#18](https://todo.sr.ht/~takeiteasy/sheaf/18).
+  [#9](https://github.com/takeiteasy/sheaf/issues/9).
 
 [^sets]: A lambda set is found by unifying function types: a function type's
     set holds the lambdas that reach it, and sets merge where values flow
