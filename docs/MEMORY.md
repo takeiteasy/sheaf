@@ -53,7 +53,7 @@ How sizes and references are written in types is in [PRELUDE.md](PRELUDE.md).
 A recursive cycle builds everything in one region, owned by the call into the
 cycle and freed when it returns. Nothing is rejected for keeping a list across a
 recursive call, as Goose rejects it. A growable value kept across one is still
-rejected: [#17](https://github.com/takeiteasy/sheaf/issues/17).
+rejected (see [Limitations](#limitations)).
 
 A cycle that builds a growable value at every level takes them from a bank the
 caller owns, since growable values cannot share a stack ([STACKS.md](STACKS.md#banks)).
@@ -73,6 +73,8 @@ linked by relative references.
 - A loop that allocates on every iteration and never exits grows without
   bound, and so does a cycle's region until the call into it returns:
   [#2](https://github.com/takeiteasy/sheaf/issues/2).
+- A growable value kept across a call back into its recursive cycle is
+  rejected: [#17](https://github.com/takeiteasy/sheaf/issues/17).
 
 [^goose]: Goose's specification covers the full rules: data stacks in §1.2
     and §1.3, roots in §9.2, stack assignment in §10.3, and recursion in §7.8.
