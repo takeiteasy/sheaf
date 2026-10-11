@@ -10,19 +10,27 @@
 
 (test exceptions-give-one-result-on-every-tier
   (let ((expected (run-on-sbcl "exceptions")))
-    (is (= 2336 expected))
+    (is (= 2689 expected))
     (is (= expected (run-specialized (defunctionalized "exceptions"))))
     (is (= expected (sheaf:run-lowered (lowered "exceptions"))))
     (is (= expected (sheaf:run-lowered (assigned "exceptions"))))
     (is (= expected (c-result "exceptions")))))
 
+(test a-cleanup-keeps-the-exception-it-runs-for
+  (loop :for (root expected) :in '(("MAIN-CLEANUP-CATCHES" 49) ("MAIN-CLEANUP-THROWS" 154)
+                                   ("MAIN-NESTED-CLEANUPS" 150))
+        :do (let ((assigned (sheaf:assign-stacks (lowered-from "exceptions" root))))
+              (is (= expected (funcall (symbol-function (fixture-symbol "exceptions" root)))) "~a on SBCL" root)
+              (is (= expected (sheaf:run-lowered assigned)) "~a in the interpreter" root)
+              (is (= expected (parse-integer (run-c assigned))) "~a in C" root))))
+
 (test exceptions-lower-to-nodes
   (let ((lowered (lowered "exceptions")))
     (is-true (sheaf:check-lowered lowered))
     (is (zerop (count-ir lowered 'sheaf:ir-foreign)))
-    (is (= 7 (count-ir lowered 'sheaf:ir-catch)))
-    (is (= 1 (count-ir lowered 'sheaf:ir-protect)))
-    (is (= 5 (count-ir lowered 'sheaf:ir-throw)))))
+    (is (= 11 (count-ir lowered 'sheaf:ir-catch)))
+    (is (= 5 (count-ir lowered 'sheaf:ir-protect)))
+    (is (= 7 (count-ir lowered 'sheaf:ir-throw)))))
 
 (test a-handler-records-the-stacks-in-use
   (let ((assigned (assigned "exceptions-stacks")) (seen 0))

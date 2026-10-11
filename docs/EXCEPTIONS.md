@@ -13,10 +13,11 @@ data stacks the unwound calls were using.
   (if (== n 0) (throw (Bad 5)) n))
 
 (define (safe n)
-  (catch (protect (check n) (cell:write! done 1))
-    ((Bad x) (+ x 100))
-    ((the Failure _) 7)
-    (_ 0)))
+  (let ((done (cell:new 0)))
+    (catch (protect (check n) (cell:write! done 1))
+      ((Bad x) (+ x 100))
+      ((the Failure _) 7)
+      (_ 0))))
 ```
 
 ## Forms
@@ -55,7 +56,7 @@ are left alone[^busy].
 | A pool or region of an unwound call | Given back |
 | A growable local, or a bank slice, of an unwound call | Given back |
 | A growable value from outside the handler | Keeps what it grew |
-| Cells built for the result in a stack in use | Stay until that stack's owner ends: [#26](https://github.com/takeiteasy/sheaf/issues/26) |
+| Cells built for the result in a stack in use | Stay until that stack's owner ends |
 
 ## What an exception holds
 
@@ -76,6 +77,8 @@ Lowering does not support the exception type HEAVY, which holds VECTOR UFIX
   a `match` with no branch and an exhausted stack end the program, and raw
   Lisp such as `unwrap` and `assert` is not translated
   ([#7](https://github.com/takeiteasy/sheaf/issues/7)).
+- Cells a throw abandons in a stack in use stay until its owner ends:
+  [#26](https://github.com/takeiteasy/sheaf/issues/26).
 - A handler saves every free stack, however few the guarded expression uses:
   [#25](https://github.com/takeiteasy/sheaf/issues/25).
 - An exception of `(repr :native ...)` has no constructors and is an error.

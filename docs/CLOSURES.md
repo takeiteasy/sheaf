@@ -81,6 +81,8 @@ of the construct.
 - Partial application, keyword arguments, constructors used as functions and
   the `for` and `values` forms are errors:
   [#10](https://github.com/takeiteasy/sheaf/issues/10).
+- `handle`, `resumable` and `resume-to` are errors:
+  [#24](https://github.com/takeiteasy/sheaf/issues/24).
 - A `Cell` captured by only one closure stays a separate value, not a field of
   that closure's case:
   [#9](https://github.com/takeiteasy/sheaf/issues/9).
