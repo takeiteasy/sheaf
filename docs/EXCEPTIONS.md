@@ -45,18 +45,27 @@ outside the `protect`.
 
 ## Stacks
 
-A handler saves the top of every data stack that is free where it is entered,
-and the head of every bank, and restores them when control lands in it.
-Stack assignment records the stacks in use there (`ir-catch-busy`,
-`ir-protect-busy`), which hold what the code after the handler still reads and
-are left alone[^busy].
+A handler saves the top of each data stack, and the head of each bank, that its
+guarded expression can build on, and restores them when control lands in it.
+Stack assignment records them (`ir-catch-marks`, `ir-protect-marks` and their
+bank slots), and the stacks in use where the handler is entered
+(`ir-catch-busy`, `ir-protect-busy`), which hold what the code after the handler
+still reads[^busy].
 
 | Where a throw leaves | After the unwind |
 |---|---|
 | A pool or region of an unwound call | Given back |
 | A growable local, or a bank slice, of an unwound call | Given back |
 | A growable value from outside the handler | Keeps what it grew |
-| Cells built for the result in a stack in use | Stay until that stack's owner ends |
+| Cells and growable values built for the result in a stack in use | Given back[^reset] |
+
+```lisp
+(define (retry k)                       ; each pass gives back the cells that
+  (if (== k 0)                          ; list-or-fail built before it threw
+      (count-up 10 Nil)
+      (catch (list-or-fail 100)
+        ((Over _) (retry (- k 1))))))
+```
 
 ## What an exception holds
 
@@ -77,10 +86,9 @@ Lowering does not support the exception type HEAVY, which holds VECTOR UFIX
   a `match` with no branch and an exhausted stack end the program, and raw
   Lisp such as `unwrap` and `assert` is not translated
   ([#7](https://github.com/takeiteasy/sheaf/issues/7)).
-- Cells a throw abandons in a stack in use stay until its owner ends:
-  [#26](https://github.com/takeiteasy/sheaf/issues/26).
-- A handler saves every free stack, however few the guarded expression uses:
-  [#25](https://github.com/takeiteasy/sheaf/issues/25).
+- A handler whose guarded expression stores a value that holds storage keeps
+  the cells it built in a stack in use:
+  [#27](https://github.com/takeiteasy/sheaf/issues/27).
 - An exception of `(repr :native ...)` has no constructors and is an error.
 
 [^busy]: A stack is in use where a handler is entered if the function owns it,
@@ -88,3 +96,8 @@ Lowering does not support the exception type HEAVY, which holds VECTOR UFIX
     Every call inside the guarded expression takes its own pools and regions
     from the others, so a stack outside that set holds nothing that survives
     the handler.
+[^reset]: The stacks given back are the def's pool, region and destination, the
+    growable stacks the handler's result is built on, and its result bank. A
+    handler gives them back only if its guarded expression, a cleanup in it and
+    every def they call store no value that holds storage and run no raw Lisp,
+    since a stored value could outlive the unwind.

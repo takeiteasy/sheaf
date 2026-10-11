@@ -63,6 +63,68 @@
     (is (zerop code))
     (is (= 3000 (parse-integer output)))))
 
+(defun handler-sets (assigned type)
+  "For each handler of TYPE in ASSIGNED, its saved stacks, saved banks and busy stacks."
+  (let ((sets '()))
+    (maphash (lambda (name def)
+               (declare (ignore name))
+               (sheaf:walk-ir (lambda (node)
+                                (when (typep node type)
+                                  (push (etypecase node
+                                          (sheaf:ir-catch (list (sheaf:ir-catch-marks node) (sheaf:ir-catch-bank-marks node)
+                                                                (sheaf:ir-catch-busy node)))
+                                          (sheaf:ir-protect (list (sheaf:ir-protect-marks node) (sheaf:ir-protect-bank-marks node)
+                                                                  (sheaf:ir-protect-busy node))))
+                                        sets)))
+                              (sheaf:ir-def-body def)))
+             (sheaf:lowered-defs assigned))
+    sets))
+
+(defun gives-back-busy-p (assigned type)
+  "Whether some handler of TYPE in ASSIGNED saves a stack or bank that is in use where it is entered."
+  (some (lambda (set)
+          (destructuring-bind (marks bank-marks busy) set
+            (or (intersection marks busy) (intersection bank-marks busy))))
+        (handler-sets assigned type)))
+
+(test a-handler-saves-only-what-its-body-builds-on
+  (let ((sets (handler-sets (stacks-from "MAIN-COUNTDOWN") 'sheaf:ir-catch)))
+    (is (plusp (length sets)))
+    (is (every (lambda (set) (and (null (first set)) (null (second set)))) sets)))
+  (let ((assigned (stacks-from "MAIN-BANKS")))
+    (is (every (lambda (set) (subsetp (first set) (loop :for i :below (sheaf:lowered-stack-count assigned) :collect i)))
+               (handler-sets assigned 'sheaf:ir-catch)))
+    (is (some (lambda (set) (second set)) (handler-sets assigned 'sheaf:ir-catch)))))
+
+(test a-catch-gives-back-cells-its-body-built-in-a-stack-in-use
+  (dolist (root '("MAIN-RETRY-LIST-SMALL" "MAIN-RETRY-PROTECTED-SMALL" "MAIN-RETRY-VECTOR-SMALL" "MAIN-RETRY-BANKS-SMALL"))
+    (let ((assigned (stacks-from root)))
+      (is-true (gives-back-busy-p assigned 'sheaf:ir-catch) "~a" root)
+      (is (= (funcall (symbol-function (fixture-symbol "exceptions-stacks" root)))
+             (sheaf:run-lowered assigned)
+             (parse-integer (run-c assigned)))
+          "~a" root)))
+  (is-true (gives-back-busy-p (stacks-from "MAIN-RETRY-PROTECTED-SMALL") 'sheaf:ir-protect)))
+
+(test a-retried-catch-does-not-grow-the-stack-in-use
+  (loop :for (root expected) :in '(("MAIN-RETRY-LIST" 55) ("MAIN-RETRY-PROTECTED" 55) ("MAIN-RETRY-VECTOR" 1))
+        :do (multiple-value-bind (output errors code)
+                (run-c (stacks-from root) "-DSHEAF_STACK_SIZE=1048576")
+              (declare (ignore errors))
+              (is (zerop code) "~a" root)
+              (is (= expected (parse-integer output)) "~a" root)))
+  (multiple-value-bind (output errors code) (apply #'run-c (stacks-from "MAIN-RETRY-BANKS") *small-banks*)
+    (declare (ignore errors))
+    (is (zerop code))
+    (is (= 2 (parse-integer output)))))
+
+(test a-catch-keeps-cells-its-body-stores-outside-itself
+  (let ((assigned (stacks-from "MAIN-STASH")))
+    (is-false (gives-back-busy-p assigned 'sheaf:ir-catch))
+    (is (= 15 (funcall (symbol-function (fixture-symbol "exceptions-stacks" "MAIN-STASH")))))
+    (is (= 15 (sheaf:run-lowered assigned)))
+    (is (= 15 (parse-integer (run-c assigned))))))
+
 (test a-tail-call-in-a-catch-branch-is-a-jump
   (is (nodes-of (sheaf:c-program (stacks-from "MAIN-LISTS-SMALL")) :goto)))
 

@@ -1,9 +1,11 @@
 ;;;; exceptions-stacks.lisp
-;;;; Throws that unwind frames holding cells and banked vectors, in loops that would run out of stack if the unwinding leaked.
+;;;; Throws that unwind frames holding cells and banked vectors, in loops that would run out of stack if the unwinding leaked, and
+;;;; guarded bodies that build their result in a stack the handler's owner keeps.
 
 (defpackage #:sheaf/fixtures/exceptions-stacks
   (:use #:coalton #:coalton-prelude)
   (:local-nicknames
+   (#:cell #:coalton/cell)
    (#:vector #:coalton/vector)))
 
 (in-package #:sheaf/fixtures/exceptions-stacks)
@@ -67,6 +69,94 @@
         0
         (catch (countdown (- n 1))
           ((Over x) x))))
+
+  (declare list-or-fail (UFix -> List UFix))
+  (define (list-or-fail n)
+    (let ((xs (count-up n Nil)))
+      (if (== n 0) xs (throw (Over n)))))
+
+  (declare retry-list (UFix -> List UFix))
+  (define (retry-list k)
+    (if (== k 0)
+        (count-up 10 Nil)
+        (catch (list-or-fail 100)
+          ((Over _) (retry-list (- k 1))))))
+
+  (declare retry-protected (UFix -> List UFix))
+  (define (retry-protected k)
+    (if (== k 0)
+        (count-up 10 Nil)
+        (catch (protect (list-or-fail 100) (total (count-up 3 Nil)))
+          ((Over _) (retry-protected (- k 1))))))
+
+  (declare vector-or-fail (UFix -> (vector:Vector UFix)))
+  (define (vector-or-fail n)
+    (let ((v (the (vector:Vector UFix) (vector:new))))
+      (vector:push! n v)
+      (if (== n 0) v (throw (Over n)))))
+
+  (declare retry-vector (UFix -> (vector:Vector UFix)))
+  (define (retry-vector k)
+    (if (== k 0)
+        (vector-or-fail 0)
+        (catch (vector-or-fail 5)
+          ((Over _) (retry-vector (- k 1))))))
+
+  (declare banks-or-fail (UFix -> (List (vector:Vector UFix))))
+  (define (banks-or-fail n)
+    (let ((vectors (vectors-down n)))
+      (if (== n 0) vectors (throw (Over n)))))
+
+  (declare retry-banks (UFix -> (List (vector:Vector UFix))))
+  (define (retry-banks k)
+    (if (== k 0)
+        (vectors-down 2)
+        (catch (banks-or-fail 3)
+          ((Over _) (retry-banks (- k 1))))))
+
+  (declare stash (UFix -> UFix))
+  (define (stash n)
+    (let ((holder (the (cell:Cell (List UFix)) (cell:new Nil))))
+      (catch (progn
+               (cell:write! holder (count-up n Nil))
+               (throw (Over n)))
+        ((Over _) (total (cell:read holder))))))
+
+  (declare main-retry-list-small (Void -> UFix))
+  (define (main-retry-list-small)
+    (total (retry-list 20)))
+
+  (declare main-retry-list (Void -> UFix))
+  (define (main-retry-list)
+    (total (retry-list 100000)))
+
+  (declare main-retry-protected-small (Void -> UFix))
+  (define (main-retry-protected-small)
+    (total (retry-protected 20)))
+
+  (declare main-retry-protected (Void -> UFix))
+  (define (main-retry-protected)
+    (total (retry-protected 100000)))
+
+  (declare main-retry-vector-small (Void -> UFix))
+  (define (main-retry-vector-small)
+    (vector:length (retry-vector 20)))
+
+  (declare main-retry-vector (Void -> UFix))
+  (define (main-retry-vector)
+    (vector:length (retry-vector 100000)))
+
+  (declare main-retry-banks-small (Void -> UFix))
+  (define (main-retry-banks-small)
+    (vector-count (retry-banks 5)))
+
+  (declare main-retry-banks (Void -> UFix))
+  (define (main-retry-banks)
+    (vector-count (retry-banks 1000)))
+
+  (declare main-stash (Void -> UFix))
+  (define (main-stash)
+    (stash 5))
 
   (declare main-countdown (Void -> UFix))
   (define (main-countdown)

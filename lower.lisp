@@ -47,9 +47,9 @@
 (defstruct (ir-match (:include ir-node)) scrutinee branches)
 (defstruct ir-branch pattern body)
 (defstruct (ir-throw (:include ir-node)) value)
-(defstruct (ir-catch (:include ir-node)) body branches (busy '()))
+(defstruct (ir-catch (:include ir-node)) body branches (busy '()) (marks '()) (bank-marks '()))
 (defstruct ir-catch-branch type pattern body)
-(defstruct (ir-protect (:include ir-node)) body cleanup (stacks '()) (bank nil) (busy '()))
+(defstruct (ir-protect (:include ir-node)) body cleanup (stacks '()) (bank nil) (busy '()) (marks '()) (bank-marks '()))
 
 (defstruct (ir-pattern (:constructor nil))
   (type nil :type (or null ir-type)))

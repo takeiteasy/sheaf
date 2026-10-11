@@ -17,7 +17,6 @@
 (defvar *def-tail-calls*)
 (defvar *def-cycle*)
 (defvar *aux* '() "The functions that expressions need defined before the defs, newest first.")
-(defvar *banks-used* nil "Whether the program has banks, which a handler gives back to when it unwinds.")
 
 (defun emit-error (control &rest args)
   (let ((location (and *emit-def* (ir-def-location *emit-def*))))
@@ -665,24 +664,18 @@ a copy of the scrutinee if it is a global."
     `((:assign ,(thrown type) ,(atom-expr (ir-throw-value node) env))
       (:expr (:call "sheaf_throw" (:int ,(type-id type)) (:string ,(type-text type)))))))
 
-;; TODO: saves every free stack, where the stacks the guarded expression can
-;; reach would do. https://github.com/takeiteasy/sheaf/issues/25
-;; TODO: cells the guarded expression builds in a stack in BUSY stay until its
-;; owner ends. https://github.com/takeiteasy/sheaf/issues/26
-(defun save-marks (busy)
-  "The declarations that save the top of each stack not in BUSY, and the bank
-head if the program has banks, and the statements that restore them. Nothing
-the stacks hold outside BUSY is live where a handler is entered."
+(defun save-marks (marks bank-marks)
+  "The declarations that save the top of each stack in MARKS and the head of each
+bank in BANK-MARKS, and the statements that restore them."
   (let ((saves '()) (restores '()))
-    (dotimes (index (lowered-stack-count *lowered*))
-      (unless (member index busy)
-        (let ((mark (fresh-c-name (make-symbol "MARK"))))
-          (push `(:decl (:ptr (:name "char")) ,mark (:dot ,(stack-node index) "top")) saves)
-          (push `(:assign (:dot ,(stack-node index) "top") ,(var mark)) restores))
-        (when *banks-used*
-          (let ((mark (fresh-c-name (make-symbol "MARK"))))
-            (push `(:decl (:ptr (:name "sheaf_slice")) ,mark (:dot ,(bank-node index) "head")) saves)
-            (push `(:expr (:call "sheaf_bank_release" (:addr ,(bank-node index)) ,(var mark))) restores)))))
+    (dolist (index marks)
+      (let ((mark (fresh-c-name (make-symbol "MARK"))))
+        (push `(:decl (:ptr (:name "char")) ,mark (:dot ,(stack-node index) "top")) saves)
+        (push `(:assign (:dot ,(stack-node index) "top") ,(var mark)) restores)))
+    (dolist (index bank-marks)
+      (let ((mark (fresh-c-name (make-symbol "MARK"))))
+        (push `(:decl (:ptr (:name "sheaf_slice")) ,mark (:dot ,(bank-node index) "head")) saves)
+        (push `(:expr (:call "sheaf_bank_release" (:addr ,(bank-node index)) ,(var mark))) restores)))
     (values (nreverse saves) (nreverse restores))))
 
 (defun open-frame (frame match)
@@ -747,7 +740,7 @@ pushed, then the branch the thrown value matches if control lands in the frame."
           :do (setf dispatch `((:if (:== ,(var "sheaf_branch") (:int ,i))
                                     ,(emit-catch-branch branch target env)
                                     ,dispatch))))
-    (multiple-value-bind (saves restores) (save-marks (ir-catch-busy node))
+    (multiple-value-bind (saves restores) (save-marks (ir-catch-marks node) (ir-catch-bank-marks node))
       `((:block
           ,@saves
           ,@(when (eq target :return) `((:decl ,(c-type (ir-node-type node)) ,result nil :unused t)))
@@ -777,7 +770,7 @@ in the frame, which then goes on unwinding."
                      (:decl ,(c-type (ir-node-type (ir-protect-cleanup node))) ,discarded nil :unused t)
                      ,@(emit-node (ir-protect-cleanup node) discarded env)
                      ,@(emit-releases owned)))))))
-      (multiple-value-bind (saves restores) (save-marks (ir-protect-busy node))
+      (multiple-value-bind (saves restores) (save-marks (ir-protect-marks node) (ir-protect-bank-marks node))
         `((:block
             ,@saves
             ,@(when (eq target :return) `((:decl ,(c-type (ir-node-type node)) ,result nil :unused t)))
@@ -956,12 +949,11 @@ for each def that enters it."
             :public t))))
 
 (defun scan-program (defs)
-  "The exception types DEFS throw or catch, whether any def throws, catches or
-protects, and whether any uses a bank."
-  (let ((types '()) (handlers nil) (banks nil))
+  "The exception types DEFS throw or catch, and whether any def throws, catches
+or protects."
+  (let ((types '()) (handlers nil))
     (maphash (lambda (name def)
                (declare (ignore name))
-               (when (ir-def-bank def) (setf banks t))
                (walk-ir (lambda (node)
                           (typecase node
                             (ir-throw (setf handlers t)
@@ -970,14 +962,10 @@ protects, and whether any uses a bank."
                              (dolist (branch (ir-catch-branches node))
                                (when (ir-catch-branch-type branch)
                                  (pushnew (ir-catch-branch-type branch) types))))
-                            (ir-protect (setf handlers t)
-                             (when (ir-protect-bank node) (setf banks t)))
-                            (ir-let (when (ir-let-bank node) (setf banks t)))
-                            (ir-call (when (ir-call-bank node) (setf banks t)))
-                            (ir-prim (when (ir-prim-bank node) (setf banks t)))))
+                            (ir-protect (setf handlers t))))
                         (ir-def-body def)))
              defs)
-    (values (nreverse types) handlers banks)))
+    (values (nreverse types) handlers)))
 
 (defun exception-definitions (types)
   "The C struct that holds the value being thrown, a union of the exception TYPES."
@@ -1000,12 +988,11 @@ protects, and whether any uses a bank."
         (*def-tail-calls* (make-hash-table :test 'eq))
         (*def-cycle* (make-hash-table :test 'eq))
         (*aux* '())
-        (*banks-used* nil)
         (defs (lowered-defs assigned))
         (stacks (max 1 (lowered-stack-count assigned)))
         (exception-types '())
         (handlers nil))
-    (multiple-value-setq (exception-types handlers *banks-used*) (scan-program defs))
+    (multiple-value-setq (exception-types handlers) (scan-program defs))
     (maphash (lambda (name def)
                (declare (ignore def))
                (setf (gethash name *c-names*) (fresh-c-name name)))

@@ -105,7 +105,9 @@ VECTORS-DOWN<UFIX → LIST (VECTOR UFIX)>{12}[dest 1 bank 2 busy 0 1 2]
 | `ir-prim-bank` | The bank a growable value takes its stack from |
 | `ir-prim-stack` | The stack an array is pushed to |
 | `ir-def-pool` | The pool a clone owns |
-| `ir-catch-busy`, `ir-protect-busy` | The stacks in use where a handler is entered, which a throw leaves alone ([EXCEPTIONS.md](EXCEPTIONS.md)) |
+| `ir-catch-busy`, `ir-protect-busy` | The stacks in use where a handler is entered ([EXCEPTIONS.md](EXCEPTIONS.md)) |
+| `ir-catch-marks`, `ir-protect-marks` | The stacks a handler saves on entry and restores when control lands in it |
+| `ir-catch-bank-marks`, `ir-protect-bank-marks` | The banks a handler saves and restores likewise |
 | `ir-protect-stacks`, `ir-protect-bank` | The stacks and bank a `protect` cleanup owns |
 | `ir-def-destination` | The destination a clone's cells and arrays are built on |
 | `ir-def-growables` | The stacks a clone's growable values are built on |

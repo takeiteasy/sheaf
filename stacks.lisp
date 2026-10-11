@@ -275,6 +275,120 @@ cycle's members and whether they build storage, which needs a region."
             (setf (gethash name table) cycle)))))
     table))
 
+;;; Handlers
+
+(defstruct (effects (:constructor make-effects ()))
+  "The stacks and banks some code builds on, and whether it stores a value that
+holds storage."
+  (stacks '()) (banks '()) (stores nil))
+
+(defun merge-effects (into other)
+  (setf (effects-stacks into) (union (effects-stacks into) (effects-stacks other))
+        (effects-banks into) (union (effects-banks into) (effects-banks other))
+        (effects-stores into) (or (effects-stores into) (effects-stores other))))
+
+(defun effects-equal (a b)
+  (and (null (set-exclusive-or (effects-stacks a) (effects-stacks b)))
+       (null (set-exclusive-or (effects-banks a) (effects-banks b)))
+       (eq (effects-stores a) (effects-stores b))))
+
+(defun stores-storage-p (prim)
+  "Whether the primitive PRIM stores a value that holds storage."
+  (destructuring-bind (&optional kind index &rest rest) (cdr (assoc (ir-prim-op prim) *prim-roots*))
+    (declare (ignore rest))
+    (and (eq kind :stores)
+         (holds-storage-p (ir-node-type (nth index (ir-prim-args prim)))))))
+
+(defun code-effects (node table)
+  "What the code NODE builds on, with each def it calls or forces taking its
+effects from TABLE."
+  (let ((effects (make-effects)))
+    (flet ((stacks (indices)
+             (setf (effects-stacks effects) (union (remove nil indices) (effects-stacks effects))))
+           (bank (index)
+             (when index (pushnew index (effects-banks effects))))
+           (def (name)
+             (let ((known (gethash name table)))
+               (when known (merge-effects effects known)))))
+      (walk-ir (lambda (node)
+                 (etypecase node
+                   ((or ir-literal ir-local ir-match ir-throw ir-catch))
+                   (ir-global (def (ir-global-name node)))
+                   (ir-foreign (setf (effects-stores effects) t))
+                   (ir-construct (stacks (list (ir-construct-stack node))))
+                   (ir-prim (stacks (list (ir-prim-stack node)))
+                    (bank (ir-prim-bank node))
+                    (when (stores-storage-p node) (setf (effects-stores effects) t)))
+                   (ir-call (stacks (list* (ir-call-destination node) (ir-call-region node) (ir-call-growables node)))
+                    (bank (ir-call-bank node))
+                    (def (ir-call-function node)))
+                   (ir-let (stacks (ir-let-stacks node))
+                    (bank (ir-let-bank node)))
+                   (ir-protect (stacks (ir-protect-stacks node))
+                    (bank (ir-protect-bank node)))))
+               node))
+    effects))
+
+(defun clone-effects (defs)
+  "A table from the name of each def in DEFS, a table of clones, to what it builds on."
+  (let ((table (make-hash-table :test 'eq)))
+    (dolist (members (strongly-connected-components
+                      (loop :for name :being :the :hash-keys :of defs :collect name)
+                      (lambda (name)
+                        (let ((names '()))
+                          (walk-ir (lambda (node)
+                                     (typecase node
+                                       (ir-call (pushnew (ir-call-function node) names))
+                                       (ir-global (pushnew (ir-global-name node) names))))
+                                   (ir-def-body (gethash name defs)))
+                          names))))
+      (loop :for changed := nil
+            :do (dolist (name members)
+                  (let* ((def (gethash name defs))
+                         (new (code-effects (ir-def-body def) table))
+                         (old (gethash name table)))
+                    (when (ir-def-pool def)
+                      (pushnew (ir-def-pool def) (effects-stacks new)))
+                    (unless (and old (effects-equal old new))
+                      (setf changed t
+                            (gethash name table) new))))
+            :while changed))
+    table))
+
+;; TODO: a store of storage anywhere in a handler's body keeps its busy stacks, where
+;; a store into storage the body built itself would be safe to give back.
+;; https://github.com/takeiteasy/sheaf/issues/27
+(defun handler-marks (body busy stacks banks table)
+  "The stacks and banks a handler with the guarded code BODY saves when it is
+entered and restores when control lands in it: those BODY builds on that are free
+there, and those BODY builds on among STACKS and BANKS, the busy ones it may give
+back, unless it stores storage that could outlive it."
+  (let ((effects (code-effects body table)))
+    (flet ((marks (touched candidates)
+             (sort (copy-list (union (set-difference touched busy)
+                                     (and (not (effects-stores effects)) (intersection candidates touched))))
+                   #'<)))
+      (values (marks (effects-stacks effects) stacks)
+              (marks (effects-banks effects) banks)))))
+
+(defun assign-handler-marks (defs)
+  "Replace the candidates each catch and protect in DEFS holds with the stacks and banks it saves."
+  (let ((table (clone-effects defs)))
+    (maphash (lambda (name def)
+               (declare (ignore name))
+               (walk-ir (lambda (node)
+                          (typecase node
+                            (ir-catch
+                             (setf (values (ir-catch-marks node) (ir-catch-bank-marks node))
+                                   (handler-marks (ir-catch-body node) (ir-catch-busy node)
+                                                  (ir-catch-marks node) (ir-catch-bank-marks node) table)))
+                            (ir-protect
+                             (setf (values (ir-protect-marks node) (ir-protect-bank-marks node))
+                                   (handler-marks (ir-protect-body node) (ir-protect-busy node)
+                                                  (ir-protect-marks node) (ir-protect-bank-marks node) table)))))
+                        (ir-def-body def)))
+             defs)))
+
 ;;; Assignment
 
 (defun take-index (busy)
@@ -364,6 +478,17 @@ them out, the region its cycle allocates in, and the stacks in use on entry."
                                 (clone-def callee dest stacks call-bank callee-region (with-index busy callee-region))))
                              (t (clone-def callee dest stacks call-bank nil busy))))
                  copy))
+             (reset-candidates (node reaches owned supply owned-bank)
+               "The stacks and banks the handler NODE may give back when control
+lands in it, which the body builds its result on. A stack only counts if the body
+uses it."
+               (let ((growables (if reaches supply owned)))
+                 (values (remove-duplicates
+                          (append (remove nil (list destination pool))
+                                  (subseq growables 0 (min (tail-need node) (length growables)))))
+                         (and (tail-banked-p node)
+                              (let ((bank (if reaches bank owned-bank)))
+                                (and bank (list bank)))))))
              (rewrite (node reaches busy owned supply owned-bank)
                (etypecase node
                  ((or ir-literal ir-local ir-foreign) node)
@@ -420,6 +545,8 @@ them out, the region its cycle allocates in, and the stacks in use on entry."
                  (ir-catch
                   (let ((copy (copy-ir-catch node)))
                     (setf (ir-catch-busy copy) busy
+                          (values (ir-catch-marks copy) (ir-catch-bank-marks copy))
+                          (reset-candidates node reaches owned supply owned-bank)
                           (ir-catch-body copy) (rewrite (ir-catch-body node) reaches busy owned supply owned-bank)
                           (ir-catch-branches copy)
                           (loop :for branch :in (ir-catch-branches node)
@@ -436,6 +563,8 @@ them out, the region its cycle allocates in, and the stacks in use on entry."
                          (inner (with-index (reduce #'with-index stacks :initial-value busy) cleanup-bank))
                          (copy (copy-ir-protect node)))
                     (setf (ir-protect-busy copy) busy
+                          (values (ir-protect-marks copy) (ir-protect-bank-marks copy))
+                          (reset-candidates node reaches owned supply owned-bank)
                           (ir-protect-stacks copy) stacks
                           (ir-protect-bank copy) cleanup-bank
                           (ir-protect-body copy) (rewrite (ir-protect-body node) reaches busy owned supply owned-bank)
@@ -470,9 +599,14 @@ stack below its stack count. Returns T."
       (error "The program has no stack assignment"))
     (maphash
      (lambda (name def)
-       (flet ((check-index (index what)
+       (labels ((check-index (index what)
                 (unless (and (integerp index) (< -1 index count))
-                  (error "~s: ~a has no stack below ~d" name what count))))
+                  (error "~s: ~a has no stack below ~d" name what count)))
+              (check-marks (marks bank-marks)
+                (dolist (index marks)
+                  (check-index index "a handler's saved stack"))
+                (dolist (index bank-marks)
+                  (check-index index "a handler's saved bank"))))
          (walk-ir (lambda (node)
                     (typecase node
                       (ir-construct (when (pooled-p (ir-node-type node))
@@ -502,7 +636,9 @@ stack below its stack count. Returns T."
                               (when (ir-let-bank node)
                                 (check-index (ir-let-bank node) "a bank"))
                               (check-distinct name (cons (ir-let-bank node) (ir-let-stacks node))))
-                      (ir-protect (dolist (index (ir-protect-stacks node))
+                      (ir-catch (check-marks (ir-catch-marks node) (ir-catch-bank-marks node)))
+                      (ir-protect (check-marks (ir-protect-marks node) (ir-protect-bank-marks node))
+                                  (dolist (index (ir-protect-stacks node))
                                     (check-index index "a cleanup's growable local"))
                                   (when (ir-protect-bank node)
                                     (check-index (ir-protect-bank node) "a cleanup's bank"))
@@ -557,9 +693,10 @@ called in, so every stack index is a constant. Returns the new program, whose
                (when (eq (ir-def-kind def) :value)
                  (global-clone name)))
              defs)
-    (let ((assigned (%make-lowered :defs *defs* :types (lowered-types lowered)
-                                   :root (global-clone (lowered-root lowered))
-                                   :stack-count *stack-count*)))
-      (check-lowered assigned)
-      (check-assigned assigned)
-      assigned)))
+    (let ((root-clone (global-clone (lowered-root lowered))))
+      (assign-handler-marks *defs*)
+      (let ((assigned (%make-lowered :defs *defs* :types (lowered-types lowered)
+                                     :root root-clone :stack-count *stack-count*)))
+        (check-lowered assigned)
+        (check-assigned assigned)
+        assigned))))

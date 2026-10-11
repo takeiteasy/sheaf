@@ -70,9 +70,9 @@
    #:ir-match #:ir-match-scrutinee #:ir-match-branches
    #:ir-branch #:ir-branch-pattern #:ir-branch-body
    #:ir-throw #:ir-throw-value
-   #:ir-catch #:ir-catch-body #:ir-catch-branches #:ir-catch-busy
+   #:ir-catch #:ir-catch-body #:ir-catch-branches #:ir-catch-busy #:ir-catch-marks #:ir-catch-bank-marks
    #:ir-catch-branch #:ir-catch-branch-type #:ir-catch-branch-pattern #:ir-catch-branch-body
-   #:ir-protect #:ir-protect-body #:ir-protect-cleanup #:ir-protect-stacks #:ir-protect-bank #:ir-protect-busy
+   #:ir-protect #:ir-protect-body #:ir-protect-cleanup #:ir-protect-stacks #:ir-protect-bank #:ir-protect-busy #:ir-protect-marks #:ir-protect-bank-marks
    #:ir-pattern #:ir-pattern-type
    #:ir-pvar #:ir-pvar-name
    #:ir-pwild

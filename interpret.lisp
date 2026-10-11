@@ -118,6 +118,29 @@ the run touched when the program has a stack assignment."
                  (remhash index dynamic))
                (remhash bank banks)
                (release bank))
+             (give-back-since (resets)
+               "Free what the stacks and banks in RESETS, from `reset-marks`, gained since."
+               (loop :for (kind index mark) :in resets
+                     :do (ecase kind
+                           (:stack (let ((stack (stack index)))
+                                     (loop :until (eq (stack-items stack) mark)
+                                           :do (setf (datum-freed (pop (stack-items stack))) t))))
+                           (:bank (loop :until (eq (gethash index banks) mark)
+                                        :do (let ((slice (pop (gethash index banks))))
+                                              (release slice)
+                                              (remhash slice dynamic)))))))
+             (reset-marks (node)
+               "What a handler NODE gives back when control lands in it: the busy
+stacks and banks it saves, each with what it held on entry."
+               (when stacks
+                 (multiple-value-bind (marks bank-marks busy)
+                     (etypecase node
+                       (ir-catch (values (ir-catch-marks node) (ir-catch-bank-marks node) (ir-catch-busy node)))
+                       (ir-protect (values (ir-protect-marks node) (ir-protect-bank-marks node) (ir-protect-busy node))))
+                   (append (loop :for index :in (intersection marks busy)
+                                 :collect (list :stack index (stack-items (stack index))))
+                           (loop :for index :in (intersection bank-marks busy)
+                                 :collect (list :bank index (gethash index banks)))))))
              (push-cell (index cell)
                (let ((stack (stack index)))
                  (unless (stack-owned stack)
@@ -331,21 +354,28 @@ the run touched when the program has a stack assignment."
                     (error "Unhandled exception of type ~a" (type-text type))))
                  (ir-catch
                   (let* ((tag (list nil))
+                         (resets (reset-marks node))
                          (outcome (catch tag
                                     (let ((*handlers* (cons (list node env tag) *handlers*)))
                                       (list nil (evaluate (ir-catch-body node) env))))))
                     (if (null (first outcome))
                         (second outcome)
-                        (evaluate (ir-catch-branch-body (first outcome)) (second outcome)))))
+                        (progn
+                          (give-back-since resets)
+                          (evaluate (ir-catch-branch-body (first outcome)) (second outcome))))))
                  (ir-protect
-                  (unwind-protect (evaluate (ir-protect-body node) env)
-                    (let ((stacks (ir-protect-stacks node))
-                          (bank (ir-protect-bank node)))
-                      (mapc #'claim stacks)
-                      (when bank (claim bank))
-                      (unwind-protect (evaluate (ir-protect-cleanup node) env)
-                        (when bank (release-bank bank))
-                        (mapc #'release stacks))))))))
+                  (let ((resets (reset-marks node))
+                        (returned nil))
+                    (unwind-protect (prog1 (evaluate (ir-protect-body node) env)
+                                      (setf returned t))
+                      (unless returned (give-back-since resets))
+                      (let ((stacks (ir-protect-stacks node))
+                            (bank (ir-protect-bank node)))
+                        (mapc #'claim stacks)
+                        (when bank (claim bank))
+                        (unwind-protect (evaluate (ir-protect-cleanup node) env)
+                          (when bank (release-bank bank))
+                          (mapc #'release stacks)))))))))
       (sb-int:with-float-traps-masked (:overflow :invalid :divide-by-zero :inexact)
         (let ((root (global (lowered-root lowered))))
           (when stacks
