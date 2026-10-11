@@ -85,14 +85,37 @@
 
 (defun decl-text (node)
   "The declaration NODE without its semicolon."
-  (destructuring-bind (type name init &key unused static) (rest node)
+  (destructuring-bind (type name init &key unused static array) (rest node)
     (format nil "~:[~;static ~]~a~:[~; SHEAF_UNUSED~]~@[ = ~a~]"
-            static (declaration-text type name) unused (and init (c-text init)))))
+            static (declaration-text type (if array (format nil "~a[~d]" name array) name))
+            unused (and init (c-text init)))))
+
+(defun function-head (type name params &key public)
+  "The head of the function NAME returning TYPE, with PARAMS as text, `void` if none."
+  (format nil "~:[static SHEAF_UNUSED ~;~]~a" public
+          (declaration-text type (format nil "~a(~:[void~;~:*~{~a~^, ~}~])" name params))))
 
 (defun print-line (stream depth control &rest args)
   (dotimes (i depth) (write-string "  " stream))
   (apply #'format stream control args)
   (terpri stream))
+
+(defun print-members (members stream depth)
+  "The members of a struct or union."
+  (dolist (member members)
+    (destructuring-bind (kind &rest args) member
+      (ecase kind
+        (:field (print-line stream depth "~a;" (declaration-text (first args) (second args))))
+        (:flexible (print-line stream depth "~a[];" (declaration-text (first args) (second args))))
+        (:union
+         (print-line stream depth "union {")
+         (print-members (rest args) stream (1+ depth))
+         (print-line stream depth "} ~a;" (first args)))
+        (:anon-struct
+         (destructuring-bind (name array-p &rest fields) args
+           (print-line stream depth "struct {")
+           (print-members fields stream (1+ depth))
+           (print-line stream depth "} ~a~:[~;[]~];" name array-p)))))))
 
 (defun print-if (node stream depth)
   "The `if` NODE, with an `if` as its else printed as `else if`."
@@ -131,6 +154,25 @@
          (print-c args stream (1+ depth))
          (print-line stream depth "}"))
         (:if (print-if node stream depth))
+        (:include (print-line stream depth "#include \"~a\"" (first args)))
+        (:struct-decl (print-line stream depth "struct ~a;" (first args)))
+        (:struct-def
+         (print-line stream depth "struct ~a {" (first args))
+         (print-members (rest args) stream (1+ depth))
+         (print-line stream depth "};"))
+        (:proto
+         (destructuring-bind (type name &rest types) args
+           (print-line stream depth "~a;" (function-head type name (mapcar #'c-text types)))))
+        (:fn
+         (destructuring-bind (type name params body &key public) args
+           (print-line stream depth "~a {"
+                       (function-head type name
+                                      (loop :for (param-type param-name) :in params
+                                            :collect (format nil "~a SHEAF_UNUSED"
+                                                             (declaration-text param-type param-name)))
+                                      :public public))
+           (print-c body stream (1+ depth))
+           (print-line stream depth "}")))
         (:for
          (destructuring-bind (init test step &rest body) args
            (print-line stream depth "for (~a; ~a; ~a) {" (decl-text init) (c-text test) (c-text step))

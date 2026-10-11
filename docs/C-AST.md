@@ -1,7 +1,8 @@
 # C AST
 
-The emitter ([EMITTER.md](EMITTER.md)) builds C as s-expressions and prints
-them with `c-text` and `print-c`. The printer adds parentheses only where
+The emitter ([EMITTER.md](EMITTER.md)) builds C as s-expressions: `c-program`
+returns a program as a list of nodes, and `print-c` writes them. `c-text` prints
+one expression or type. The printer adds parentheses only where
 precedence needs them.
 
 ```lisp
@@ -31,12 +32,24 @@ Identifiers, types and macros are strings. Everything else is a keyword node.
 
 | Node | C |
 |---|---|
-| `(:decl T "x" init :unused t :static t)` | `static T x SHEAF_UNUSED = init;`; `init` is `nil` for none |
+| `(:decl T "x" init :unused t :static t :array n)` | `static T x[n] SHEAF_UNUSED = init;`; `init` is `nil` for none |
 | `(:assign l r)`, `(:expr e)`, `(:return e)` | `l = r;`, `e;`, `return e;` |
 | `(:if c then else)` | `if`, with an `if` as the whole `else` printed as `else if` |
 | `(:for (:decl …) test step body…)` | A `for` loop |
 | `(:block s…)`, `(:goto "l")`, `(:label "l")` | `{ … }`, `goto l;`, `l: ;` |
 | `(:comment "t")`, `(:blank)` | `// t`, an empty line |
+
+## Top level
+
+| Node | C |
+|---|---|
+| `(:include "h")`, `(:struct-decl "T0")` | `#include "h"`, `struct T0;` |
+| `(:struct-def "T0" member…)` | A struct, one member per line |
+| `(:proto T "f" T…)` | A `static` prototype |
+| `(:fn T "f" ((T "p")…) (stmt…) :public t)` | A `static` function with unused parameters; `:public` omits `static` |
+
+A struct member is `(:field T "m")`, `(:flexible T "m")` for `T m[];`,
+`(:union "u" member…)` or `(:anon-struct "m" array-p member…)`.
 
 ## Precedence
 

@@ -92,3 +92,31 @@
                                        (:< (:name "i") ,*a*)
                                        (:post++ (:name "i"))
                                        (:assign (:index ,*a* (:name "i")) ,*b*)))))))
+
+(test structs-print-their-members
+  (is (string= (format nil "struct T1 {~%  uint32_t tag;~%  union {~%    struct {~%      uint64_t f0;~%      struct T1 *f1;~%    } c0;~%  } u;~%};~%")
+               (c-lines '(:struct-def "T1" (:field (:name "uint32_t") "tag")
+                          (:union "u" (:anon-struct "c0" nil
+                                       (:field (:name "uint64_t") "f0")
+                                       (:field (:ptr (:struct "T1")) "f1")))))))
+  (is (string= (format nil "struct H0 {~%  sheaf_table table;~%  struct {~%    uint64_t key;~%  } e[];~%};~%")
+               (c-lines '(:struct-def "H0" (:field (:name "sheaf_table") "table")
+                          (:anon-struct "e" t (:field (:name "uint64_t") "key"))))))
+  (is (string= (format nil "struct A0 {~%  uint64_t length;~%  uint8_t e[];~%};~%")
+               (c-lines '(:struct-def "A0" (:field (:name "uint64_t") "length")
+                          (:flexible (:name "uint8_t") "e")))))
+  (is (string= (format nil "struct T0;~%") (c-lines '(:struct-decl "T0")))))
+
+(test functions-print-their-heads
+  (is (string= (format nil "static SHEAF_UNUSED struct T1 *f(uint64_t, struct T1 *);~%")
+               (c-lines '(:proto (:ptr (:struct "T1")) "f" (:name "uint64_t") (:ptr (:struct "T1"))))))
+  (is (string= (format nil "static SHEAF_UNUSED uint64_t g(void);~%")
+               (c-lines '(:proto (:name "uint64_t") "g"))))
+  (is (string= (format nil "static SHEAF_UNUSED uint64_t f(uint64_t n SHEAF_UNUSED) {~%  return n;~%}~%")
+               (c-lines '(:fn (:name "uint64_t") "f" (((:name "uint64_t") "n")) ((:return (:name "n")))))))
+  (is (string= (format nil "int main(void) {~%  return 0;~%}~%")
+               (c-lines '(:fn (:name "int") "main" () ((:return (:int 0))) :public t))))
+  (is (string= (format nil "#include \"sheaf.h\"~%")
+               (c-lines '(:include "sheaf.h"))))
+  (is (string= (format nil "static sheaf_bank banks[4] SHEAF_UNUSED;~%")
+               (c-lines '(:decl (:name "sheaf_bank") "banks" nil :static t :array 4 :unused t)))))

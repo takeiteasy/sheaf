@@ -48,6 +48,7 @@
    #:check-roots
    #:root-summary #:root-summary-result #:root-summary-stores #:root-summary-locals #:root-summary-reached
    #:emit-c
+   #:c-program
    #:write-c
    #:size-class
    #:lowered-stack-count

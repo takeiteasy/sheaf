@@ -2,7 +2,7 @@
 
 `emit-c` writes a program with its data stacks assigned ([STACKS.md](STACKS.md))
 as one C file. The file includes `runtime/sheaf.h`, which reserves the stacks.
-Function bodies are built as s-expressions and printed ([C-AST.md](C-AST.md)).
+`c-program` builds the file as s-expressions ([C-AST.md](C-AST.md)), and `emit-c` prints them.
 
 ```lisp
 (let* ((ir (sheaf:lower (sheaf:defunctionalize (sheaf:monomorphize program 'my-package::main))))
@@ -29,15 +29,22 @@ The program prints its root's result when that is a number.
 // SUM-TO<UFIX * UFIX → UFIX>{1}[busy 0]
 static uint64_t sum_to_ufix___ufix___1(uint64_t n_60_5, uint64_t acc_61_6) {
   top: ;
-  struct T0 t_7 = (struct T0){ .tag = n_60_5 == UINT64_C(0) ? 0 : 1 };
-  if ((t_7).tag == 0) {
+  struct T0 t_7;
+  t_7 = (struct T0){ .tag = n_60_5 == UINT64_C(0) ? 0 : 1 };
+  if (t_7.tag == 0) {
     return acc_61_6;
-  } else if ((t_7).tag == 1) {
-    uint64_t t_8 = (n_60_5 - UINT64_C(1));
-    uint64_t t_9 = (acc_61_6 + UINT64_C(1));
-    n_60_5 = t_8;
-    acc_61_6 = t_9;
-    goto top;
+  } else if (t_7.tag == 1) {
+    uint64_t t_8;
+    t_8 = n_60_5 - UINT64_C(1);
+    uint64_t t_9;
+    t_9 = acc_61_6 + UINT64_C(1);
+    {
+      uint64_t arg_10 = t_8;
+      uint64_t arg_11 = t_9;
+      n_60_5 = arg_10;
+      acc_61_6 = arg_11;
+      goto top;
+    }
   } else {
     sheaf_no_match();
   }
@@ -45,7 +52,7 @@ static uint64_t sum_to_ufix___ufix___1(uint64_t n_60_5, uint64_t acc_61_6) {
 ```
 
 Each function is one clone of a def, with its full name in a comment above it.
-The excerpt omits `SHEAF_UNUSED` attributes and temporaries.
+The excerpt omits `SHEAF_UNUSED` attributes.
 
 ## Types
 

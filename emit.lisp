@@ -3,8 +3,7 @@
 
 (in-package #:sheaf)
 
-(defvar *out*)
-(defvar *indent* 0)
+(defvar *statements*)
 (defvar *c-types*)
 (defvar *c-arrays*)
 (defvar *c-names*)
@@ -23,32 +22,16 @@
            (and *emit-def* (or (ir-def-origin *emit-def*) (ir-def-name *emit-def*)))
            (and location (source:span-start (source:location-span location))))))
 
-;;; Output
+;;; Statements a helper needs first
 
-(defun printable (argument)
-  "ARGUMENT as `format` should print it: a C node as its text, and a list of them as a list of text."
-  (cond ((and (consp argument) (keywordp (first argument))) (c-text argument))
-        ((consp argument) (mapcar #'printable argument))
-        (t argument)))
-
-(defun line (control &rest args)
-  (dotimes (i *indent*) (write-string "  " *out*))
-  (apply #'format *out* control (mapcar #'printable args))
-  (terpri *out*))
-
-(defmacro indented (&body body)
-  `(let ((*indent* (1+ *indent*))) ,@body))
-
-(defmacro with-statements ((emit) &body body)
-  "Run BODY, which calls (EMIT statement) for each statement it needs first, in
+(defmacro with-statements (&body body)
+  "Run BODY, which calls `emit-stmt` for each statement it needs first, in
 order. Returns BODY's value, an expression, and the statements."
-  (let ((statements (gensym "STATEMENTS")))
-    `(let ((,statements '()))
-       (flet ((,emit (statement) (push statement ,statements)))
-         (values (progn ,@body) (nreverse ,statements))))))
+  `(let ((*statements* '()))
+     (values (progn ,@body) (nreverse *statements*))))
 
-(defun comment (text)
-  (line "// ~a" (substitute #\Space #\Newline text)))
+(defun emit-stmt (statement)
+  (push statement *statements*))
 
 ;;; Names
 
@@ -106,26 +89,36 @@ order. Returns BODY's value, an expression, and the statements."
                `(:ptr (:struct ,(struct-name type)))
                `(:struct ,(struct-name type))))))
 
-(defun emit-forward-declarations ()
-  (maphash (lambda (type id) (declare (ignore type)) (line "struct T~d;" id)) *c-types*)
-  (maphash (lambda (key id)
-             (line "struct ~a~d;" (ecase (first key) (:array "A") (:grow "G") (:table "H") (:slice "S")) id))
-           *c-arrays*))
+(defun forward-declarations ()
+  (append (loop :for id :being :the :hash-values :of *c-types*
+                :collect `(:struct-decl ,(format nil "T~d" id)))
+          (loop :for (layout) :being :the :hash-keys :of *c-arrays* :using (:hash-value id)
+                :collect `(:struct-decl ,(format nil "~a~d" (array-prefix layout) id)))))
 
-(defun emit-array-definitions (layouts)
+(defun array-prefix (layout)
+  (ecase layout (:array "A") (:grow "G") (:table "H") (:slice "S")))
+
+(defun array-definitions (layouts)
   "The C structs of the array layouts LAYOUTS, in the order they were first used."
-  (let ((entries '()))
+  (let ((entries '())
+        (u64 '(:name "uint64_t")))
     (maphash (lambda (key id) (when (member (first key) layouts) (push (cons id key) entries))) *c-arrays*)
-    (loop :for (id layout element) :in (sort entries #'< :key #'car) :do
-      (ecase layout
-        (:slice (line "struct S~d { ~a *e; uint64_t length; };" id element))
-        (:array (line "struct A~d { uint64_t length; ~a e[]; };" id element))
-        (:grow (line "struct G~d { sheaf_stack *stack; uint64_t length; ~a e[]; };" id element))
-        (:table (line "struct H~d { sheaf_table table; struct { uint64_t key, used; ~a value; } e[]; };" id element))))))
+    (loop :for (id layout element) :in (sort entries #'< :key #'car)
+          :collect (let ((name (format nil "~a~d" (array-prefix layout) id)))
+                     (ecase layout
+                       (:slice `(:struct-def ,name (:field (:ptr ,element) "e") (:field ,u64 "length")))
+                       (:array `(:struct-def ,name (:field ,u64 "length") (:flexible ,element "e")))
+                       (:grow `(:struct-def ,name (:field (:ptr (:name "sheaf_stack")) "stack")
+                                            (:field ,u64 "length") (:flexible ,element "e")))
+                       (:table `(:struct-def ,name (:field (:name "sheaf_table") "table")
+                                             (:anon-struct "e" t (:field ,u64 "key") (:field ,u64 "used")
+                                                           (:field ,element "value")))))))))
 
-(defun emit-type-definitions (lowered)
+(defun type-definitions (lowered)
+  "The C structs of the data types of LOWERED, each after the structs it holds by value."
   (let ((done (make-hash-table :test 'eq))
-        (types (loop :for type :being :the :hash-keys :of (lowered-types lowered) :collect type)))
+        (types (loop :for type :being :the :hash-keys :of (lowered-types lowered) :collect type))
+        (nodes '()))
     (labels ((define (type)
                (unless (gethash type done)
                  (setf (gethash type done) t)
@@ -133,23 +126,23 @@ order. Returns BODY's value, an expression, and the statements."
                    (when (and (eq (ir-type-kind field) :data) (not (pooled-p field)))
                      (define field)))
                  (let ((constructors (lowered-constructors lowered type)))
-                   (comment (type-text type))
-                   (line "struct ~a {" (struct-name type))
-                   (indented
-                     (line "uint32_t tag;")
-                     (when (some #'ir-constructor-fields constructors)
-                       (line "union {")
-                       (indented
-                         (dolist (constructor constructors)
-                           (when (ir-constructor-fields constructor)
-                             (line "struct { ~{~a~^ ~} } c~d;"
-                                   (loop :for field :in (ir-constructor-fields constructor)
-                                         :for i :from 0
-                                         :collect (format nil "~a f~d;" (c-text (c-type field)) i))
-                                   (ir-constructor-tag constructor)))))
-                       (line "} u;")))
-                   (line "};")))))
-      (mapc #'define types))))
+                   (push `(:comment ,(type-text type)) nodes)
+                   (push `(:struct-def ,(struct-name type)
+                                       (:field (:name "uint32_t") "tag")
+                                       ,@(when (some #'ir-constructor-fields constructors)
+                                           `((:union "u"
+                                                     ,@(loop :for constructor :in constructors
+                                                             :when (ir-constructor-fields constructor)
+                                                               :collect `(:anon-struct
+                                                                          ,(format nil "c~d" (ir-constructor-tag constructor))
+                                                                          nil
+                                                                          ,@(loop :for field :in (ir-constructor-fields constructor)
+                                                                                  :for i :from 0
+                                                                                  :collect `(:field ,(c-type field)
+                                                                                                    ,(format nil "f~d" i)))))))))
+                         nodes)))))
+      (mapc #'define types))
+    (nreverse nodes)))
 
 ;;; Expressions
 
@@ -210,169 +203,233 @@ the array, growable or slice TYPE."
     ((:array :grow) (values `(:-> ,expression "e") `(:-> ,expression "length")))
     (:slice (values `(:dot ,expression "e") `(:dot ,expression "length")))))
 
+(defun unit-literal (type)
+  (constructor-literal type "UNIT"))
+
+(defun element-c (storage-type)
+  (c-type (element-type storage-type)))
+
+(defun new-array (node length value)
+  "Push the array NODE builds with LENGTH elements, each VALUE. Returns its C variable."
+  (let* ((type (ir-node-type node))
+         (array (fresh-c-name (make-symbol "ARRAY")))
+         (index (fresh-c-name (make-symbol "I")))
+         (fill (fresh-c-name (make-symbol "FILL")))
+         (struct `(:struct ,(array-struct :array type))))
+    (emit-stmt `(:decl ,(c-type type) ,array
+                       (:call "sheaf_push" (:addr ,(stack-node (ir-prim-stack node)))
+                              (:+ (:offsetof ,struct "e") (:* ,length (:sizeof ,(element-c type))))
+                              (:alignof ,struct))))
+    (emit-stmt `(:assign (:-> ,(var array) "length") ,length))
+    (emit-stmt `(:decl ,(element-c type) ,fill ,value))
+    (emit-stmt `(:for (:decl (:name "uint64_t") ,index (:int 0))
+                      (:< ,(var index) (:-> ,(var array) "length"))
+                      (:post++ ,(var index))
+                      (:assign (:index (:-> ,(var array) "e") ,(var index)) ,(var fill))))
+    (var array)))
+
+(defun growable-stack (node)
+  "The stack the growable NODE builds grows on, as a C expression."
+  (if (ir-prim-bank node)
+      (let ((slice (fresh-c-name (make-symbol "SLICE"))))
+        (emit-stmt `(:decl (:ptr (:name "sheaf_stack")) ,slice
+                           (:call "sheaf_bank_stack" (:addr ,(bank-node (ir-prim-bank node))))))
+        (var slice))
+      `(:addr ,(stack-node (ir-prim-stack node)))))
+
+(defun new-table (node hint)
+  "Push the hash table NODE builds with room for HINT entries. Returns its C variable."
+  (let* ((type (ir-node-type node))
+         (table (fresh-c-name (make-symbol "TABLE")))
+         (struct `(:struct ,(array-struct :table type)))
+         (slot `(:index (:-> (:cast (:ptr ,struct) (:int 0)) "e") (:int 0))))
+    (emit-stmt `(:decl ,(c-type type) ,table
+                       (:cast ,(c-type type)
+                              (:call "sheaf_table_new" ,(growable-stack node) (:offsetof ,struct "e")
+                                     (:sizeof ,slot) (:alignof ,struct) ,hint))))
+    (var table)))
+
+(defun table-slots (table)
+  `(:cast (:ptr (:name "char")) (:-> ,table "e")))
+
+(defun table-slot (table)
+  `(:sizeof (:index (:-> ,table "e") (:int 0))))
+
+(defun new-growable (node)
+  "Push the empty growable NODE builds. Returns its C variable."
+  (let* ((type (ir-node-type node))
+         (growable (fresh-c-name (make-symbol "GROW")))
+         (on (growable-stack node))
+         (struct `(:struct ,(array-struct :grow type))))
+    (emit-stmt `(:decl ,(c-type type) ,growable
+                       (:call "sheaf_push" ,on (:offsetof ,struct "e") (:alignof ,struct))))
+    (emit-stmt `(:assign (:-> ,(var growable) "stack") ,on))
+    (emit-stmt `(:assign (:-> ,(var growable) "length") (:int 0)))
+    (var growable)))
+
+(defun push-element (growable value storage-type)
+  "Push VALUE onto GROWABLE, a value of STORAGE-TYPE. Returns the C variable holding its index."
+  (let ((index (fresh-c-name (make-symbol "INDEX")))
+        (slot (fresh-c-name (make-symbol "SLOT")))
+        (elem (element-c storage-type)))
+    (emit-stmt `(:decl (:name "uint64_t") ,index (:-> ,growable "length")))
+    (emit-stmt `(:decl (:ptr ,elem) ,slot
+                       (:call "sheaf_grow" (:-> ,growable "stack")
+                              (:+ (:-> ,growable "e") ,(var index)) (:sizeof ,elem))))
+    (emit-stmt `(:assign (:deref ,(var slot)) ,value))
+    (emit-stmt `(:assign (:-> ,growable "length") (:+ ,(var index) (:int 1))))
+    (var index)))
+
+(defun pop-element (growable type)
+  "Pop GROWABLE into an `Optional` of TYPE. Returns its C variable."
+  (let ((result (fresh-c-name (make-symbol "POPPED")))
+        (length `(:-> ,growable "length")))
+    (emit-stmt `(:decl ,(c-type type) ,result nil))
+    (emit-stmt `(:if (:== ,length (:int 0))
+                     ((:assign ,(var result) ,(constructor-literal type "NONE")))
+                     ((:expr (:post-- ,length))
+                      (:expr (:call "sheaf_shrink" (:-> ,growable "stack")
+                                    (:+ (:+ (:-> ,growable "e") ,length) (:int 1))
+                                    (:+ (:-> ,growable "e") ,length)))
+                      (:assign ,(var result)
+                               ,(constructor-literal type "SOME"
+                                                     `(:index (:-> ,growable "e") ,length))))))
+    (var result)))
+
+(defun checked (array-type array index)
+  "The element of ARRAY at INDEX, which aborts if INDEX is past the end."
+  (multiple-value-bind (data length) (element-access array-type array)
+    `(:index ,data (:call "sheaf_index" ,index ,length))))
+
+(defvar *prelude-emitters* (make-hash-table :test 'eq)
+  "The function that builds the C expression of each prelude operation.")
+
+(defmacro define-prelude-op (ops &body body)
+  "Define the C expression of the prelude operations OPS, a keyword or a list of
+them. BODY runs with NODE, its result TYPE, ARG-TYPES and its operands A, B and
+C as C expressions. It calls `emit-stmt` for the statements it needs first and
+returns the expression."
+  `(let ((emitter (lambda (node type arg-types a b c)
+                    (declare (ignorable node type arg-types a b c))
+                    ,@body)))
+     (dolist (op ',(if (listp ops) ops (list ops)))
+       (setf (gethash op *prelude-emitters*) emitter))))
+
+(define-prelude-op :fixed-new
+  (new-array node `(:call "UINT64_C" (:int ,(fixed-length type))) a))
+
+(define-prelude-op :array-new
+  (let ((length (fresh-c-name (make-symbol "LENGTH"))))
+    (emit-stmt `(:decl (:name "uint64_t") ,length ,a))
+    (new-array node (var length) b)))
+
+(define-prelude-op :cell-new
+  (let ((cell (fresh-c-name (make-symbol "CELL"))))
+    (emit-stmt `(:decl ,(c-type type) ,cell
+                       (:call "sheaf_push" (:addr ,(stack-node (ir-prim-stack node)))
+                              (:sizeof ,(element-c type)) (:alignof ,(element-c type)))))
+    (emit-stmt `(:assign (:deref ,(var cell)) ,a))
+    (var cell)))
+
+(define-prelude-op (:grow-new :stack-new :vector-new)
+  (new-growable node))
+
+(define-prelude-op (:grow-push :stack-push)
+  (push-element a b (first arg-types))
+  (unit-literal type))
+
+(define-prelude-op :vector-push
+  (push-element b a (second arg-types)))
+
+(define-prelude-op (:stack-pop :vector-pop)
+  (pop-element a type))
+
+(define-prelude-op :vector-index
+  (multiple-value-bind (data length) (element-access (second arg-types) b)
+    `(:? (:< ,a ,length)
+         ,(constructor-literal type "SOME" `(:index ,data ,a))
+         ,(constructor-literal type "NONE"))))
+
+(define-prelude-op :vector-index-unsafe
+  (checked (second arg-types) b a))
+
+(define-prelude-op :vector-set
+  (emit-stmt `(:assign ,(checked (third arg-types) c a) ,b))
+  (unit-literal type))
+
+(define-prelude-op (:vector-length :elements-length)
+  (nth-value 1 (element-access (first arg-types) a)))
+
+(define-prelude-op :elements-index
+  (checked (first arg-types) a b))
+
+(define-prelude-op :elements-set
+  (emit-stmt `(:assign ,(checked (first arg-types) a b) ,c))
+  (unit-literal type))
+
+(define-prelude-op :elements-ref
+  `(:addr ,(checked (first arg-types) a b)))
+
+(define-prelude-op :elements-slice
+  (multiple-value-bind (data length) (element-access (first arg-types) a)
+    (emit-stmt `(:expr (:call "sheaf_range" ,b ,c ,length)))
+    `(:compound ,(c-type type) (nil (:+ ,data ,b)) (nil (:- ,c ,b)))))
+
+(define-prelude-op (:ref-get :cell-read)
+  `(:deref ,a))
+
+(define-prelude-op :ref-set
+  (emit-stmt `(:assign (:deref ,a) ,b))
+  (unit-literal type))
+
+(define-prelude-op :cell-write
+  (emit-stmt `(:assign (:deref ,a) ,b))
+  b)
+
+(define-prelude-op :cell-swap
+  (let ((old (fresh-c-name (make-symbol "OLD"))))
+    (emit-stmt `(:decl ,(element-c (first arg-types)) ,old (:deref ,a)))
+    (emit-stmt `(:assign (:deref ,a) ,b))
+    (var old)))
+
+(define-prelude-op :hashtable-new
+  (new-table node '(:int 0)))
+
+(define-prelude-op :hashtable-with-capacity
+  (new-table node `(:? (:< ,a (:int 0)) (:call "UINT64_C" (:int 0)) (:cast (:name "uint64_t") ,a))))
+
+(define-prelude-op :hashtable-get
+  (let ((found (fresh-c-name (make-symbol "FOUND"))))
+    (emit-stmt `(:decl (:name "uint64_t") ,found
+                       (:call "sheaf_table_find" (:addr (:-> ,a "table")) ,(table-slots a)
+                              ,(table-slot a) ,b)))
+    `(:? (:== ,(var found) (:dot (:-> ,a "table") "capacity"))
+         ,(constructor-literal type "NONE")
+         ,(constructor-literal type "SOME" `(:dot (:index (:-> ,a "e") ,(var found)) "value")))))
+
+(define-prelude-op :hashtable-set
+  (let ((slot (fresh-c-name (make-symbol "SLOT"))))
+    (emit-stmt `(:decl (:name "uint64_t") ,slot
+                       (:call "sheaf_table_insert" (:addr (:-> ,a "table")) ,(table-slots a)
+                              ,(table-slot a) ,b)))
+    (emit-stmt `(:assign (:dot (:index (:-> ,a "e") ,(var slot)) "value") ,c))
+    (unit-literal type)))
+
+(define-prelude-op :hashtable-remove
+  (emit-stmt `(:expr (:call "sheaf_table_remove" (:addr (:-> ,a "table")) ,(table-slots a)
+                            ,(table-slot a) ,b)))
+  (unit-literal type))
+
+(define-prelude-op :hashtable-count
+  `(:cast (:name "int64_t") (:dot (:-> ,a "table") "count")))
+
 (defun prelude-expr (node env)
   "A C expression for the prelude operation NODE, and the statements it needs first."
-  (let* ((op (ir-prim-op node))
-         (args (mapcar (lambda (arg) (atom-expr arg env)) (ir-prim-args node)))
-         (arg-types (mapcar #'ir-node-type (ir-prim-args node)))
-         (type (ir-node-type node)))
-    (with-statements (emit)
-      (labels ((unit () (constructor-literal type "UNIT"))
-               (element-c (storage-type) (c-type (element-type storage-type)))
-               (stack ()
-                 (ir-prim-stack node))
-               (new-array (length value)
-                 (let* ((array (fresh-c-name (make-symbol "ARRAY")))
-                        (index (fresh-c-name (make-symbol "I")))
-                        (fill (fresh-c-name (make-symbol "FILL")))
-                        (struct `(:struct ,(array-struct :array type))))
-                   (emit `(:decl ,(c-type type) ,array
-                                 (:call "sheaf_push" (:addr ,(stack-node (stack)))
-                                        (:+ (:offsetof ,struct "e")
-                                            (:* ,length (:sizeof ,(element-c type))))
-                                        (:alignof ,struct))))
-                   (emit `(:assign (:-> ,(var array) "length") ,length))
-                   (emit `(:decl ,(element-c type) ,fill ,value))
-                   (emit `(:for (:decl (:name "uint64_t") ,index (:int 0))
-                                (:< ,(var index) (:-> ,(var array) "length"))
-                                (:post++ ,(var index))
-                                (:assign (:index (:-> ,(var array) "e") ,(var index)) ,(var fill))))
-                   (var array)))
-               (growable-stack ()
-                 (if (ir-prim-bank node)
-                     (let ((slice (fresh-c-name (make-symbol "SLICE"))))
-                       (emit `(:decl (:ptr (:name "sheaf_stack")) ,slice
-                                     (:call "sheaf_bank_stack" (:addr ,(bank-node (ir-prim-bank node))))))
-                       (var slice))
-                     `(:addr ,(stack-node (stack)))))
-               (new-table (hint)
-                 (let* ((table (fresh-c-name (make-symbol "TABLE")))
-                        (struct `(:struct ,(array-struct :table type)))
-                        (slot `(:index (:-> (:cast (:ptr ,struct) (:int 0)) "e") (:int 0))))
-                   (emit `(:decl ,(c-type type) ,table
-                                 (:cast ,(c-type type)
-                                        (:call "sheaf_table_new" ,(growable-stack) (:offsetof ,struct "e")
-                                               (:sizeof ,slot) (:alignof ,struct) ,hint))))
-                   (var table)))
-               (table-slots (table)
-                 `(:cast (:ptr (:name "char")) (:-> ,table "e")))
-               (table-slot (table)
-                 `(:sizeof (:index (:-> ,table "e") (:int 0))))
-               (new-growable ()
-                 (let* ((growable (fresh-c-name (make-symbol "GROW")))
-                        (on (growable-stack))
-                        (struct `(:struct ,(array-struct :grow type))))
-                   (emit `(:decl ,(c-type type) ,growable
-                                 (:call "sheaf_push" ,on (:offsetof ,struct "e") (:alignof ,struct))))
-                   (emit `(:assign (:-> ,(var growable) "stack") ,on))
-                   (emit `(:assign (:-> ,(var growable) "length") (:int 0)))
-                   (var growable)))
-               (push-element (growable value storage-type)
-                 (let ((index (fresh-c-name (make-symbol "INDEX")))
-                       (slot (fresh-c-name (make-symbol "SLOT")))
-                       (elem (element-c storage-type)))
-                   (emit `(:decl (:name "uint64_t") ,index (:-> ,growable "length")))
-                   (emit `(:decl (:ptr ,elem) ,slot
-                                 (:call "sheaf_grow" (:-> ,growable "stack")
-                                        (:+ (:-> ,growable "e") ,(var index)) (:sizeof ,elem))))
-                   (emit `(:assign (:deref ,(var slot)) ,value))
-                   (emit `(:assign (:-> ,growable "length") (:+ ,(var index) (:int 1))))
-                   (var index)))
-               (pop-element (growable)
-                 (let ((result (fresh-c-name (make-symbol "POPPED")))
-                       (length `(:-> ,growable "length")))
-                   (emit `(:decl ,(c-type type) ,result nil))
-                   (emit `(:if (:== ,length (:int 0))
-                               ((:assign ,(var result) ,(constructor-literal type "NONE")))
-                               ((:expr (:post-- ,length))
-                                (:expr (:call "sheaf_shrink" (:-> ,growable "stack")
-                                              (:+ (:+ (:-> ,growable "e") ,length) (:int 1))
-                                              (:+ (:-> ,growable "e") ,length)))
-                                (:assign ,(var result)
-                                         ,(constructor-literal type "SOME"
-                                                               `(:index (:-> ,growable "e") ,length))))))
-                   (var result)))
-               (checked (array-type array index)
-                 (multiple-value-bind (data length) (element-access array-type array)
-                   `(:index ,data (:call "sheaf_index" ,index ,length)))))
-        (destructuring-bind (&optional a b c) args
-          (destructuring-bind (&optional type-a &rest others) arg-types
-            (declare (ignore others))
-            (ecase op
-              (:fixed-new (new-array `(:call "UINT64_C" (:int ,(fixed-length type))) a))
-              (:array-new
-               (let ((length (fresh-c-name (make-symbol "LENGTH"))))
-                 (emit `(:decl (:name "uint64_t") ,length ,a))
-                 (new-array (var length) b)))
-              (:cell-new
-               (let ((cell (fresh-c-name (make-symbol "CELL"))))
-                 (emit `(:decl ,(c-type type) ,cell
-                               (:call "sheaf_push" (:addr ,(stack-node (stack))) (:sizeof ,(element-c type))
-                                      (:alignof ,(element-c type)))))
-                 (emit `(:assign (:deref ,(var cell)) ,a))
-                 (var cell)))
-              ((:grow-new :stack-new :vector-new) (new-growable))
-              ((:grow-push :stack-push)
-               (push-element a b type-a)
-               (unit))
-              (:vector-push (push-element b a (second arg-types)))
-              ((:stack-pop :vector-pop) (pop-element a))
-              (:vector-index
-               (multiple-value-bind (data length) (element-access (second arg-types) b)
-                 `(:? (:< ,a ,length)
-                      ,(constructor-literal type "SOME" `(:index ,data ,a))
-                      ,(constructor-literal type "NONE"))))
-              (:vector-index-unsafe (checked (second arg-types) b a))
-              (:vector-set
-               (emit `(:assign ,(checked (third arg-types) c a) ,b))
-               (unit))
-              (:vector-length (nth-value 1 (element-access type-a a)))
-              (:elements-length (nth-value 1 (element-access type-a a)))
-              (:elements-index (checked type-a a b))
-              (:elements-set
-               (emit `(:assign ,(checked type-a a b) ,c))
-               (unit))
-              (:elements-ref `(:addr ,(checked type-a a b)))
-              (:elements-slice
-               (multiple-value-bind (data length) (element-access type-a a)
-                 (emit `(:expr (:call "sheaf_range" ,b ,c ,length)))
-                 `(:compound ,(c-type type) (nil (:+ ,data ,b)) (nil (:- ,c ,b)))))
-              ((:ref-get :cell-read) `(:deref ,a))
-              (:ref-set
-               (emit `(:assign (:deref ,a) ,b))
-               (unit))
-              (:cell-write
-               (emit `(:assign (:deref ,a) ,b))
-               b)
-              (:cell-swap
-               (let ((old (fresh-c-name (make-symbol "OLD"))))
-                 (emit `(:decl ,(element-c type-a) ,old (:deref ,a)))
-                 (emit `(:assign (:deref ,a) ,b))
-                 (var old)))
-              (:hashtable-new (new-table '(:int 0)))
-              (:hashtable-with-capacity
-               (new-table `(:? (:< ,a (:int 0)) (:call "UINT64_C" (:int 0)) (:cast (:name "uint64_t") ,a))))
-              (:hashtable-get
-               (let ((found (fresh-c-name (make-symbol "FOUND"))))
-                 (emit `(:decl (:name "uint64_t") ,found
-                               (:call "sheaf_table_find" (:addr (:-> ,a "table")) ,(table-slots a)
-                                      ,(table-slot a) ,b)))
-                 `(:? (:== ,(var found) (:dot (:-> ,a "table") "capacity"))
-                      ,(constructor-literal type "NONE")
-                      ,(constructor-literal type "SOME"
-                                            `(:dot (:index (:-> ,a "e") ,(var found)) "value")))))
-              (:hashtable-set
-               (let ((slot (fresh-c-name (make-symbol "SLOT"))))
-                 (emit `(:decl (:name "uint64_t") ,slot
-                               (:call "sheaf_table_insert" (:addr (:-> ,a "table")) ,(table-slots a)
-                                      ,(table-slot a) ,b)))
-                 (emit `(:assign (:dot (:index (:-> ,a "e") ,(var slot)) "value") ,c))
-                 (unit)))
-              (:hashtable-remove
-               (emit `(:expr (:call "sheaf_table_remove" (:addr (:-> ,a "table")) ,(table-slots a)
-                                    ,(table-slot a) ,b)))
-               (unit))
-              (:hashtable-count `(:cast (:name "int64_t") (:dot (:-> ,a "table") "count"))))))))))
+  (let ((args (mapcar (lambda (arg) (atom-expr arg env)) (ir-prim-args node))))
+    (with-statements
+      (destructuring-bind (&optional a b c) args
+        (funcall (gethash (ir-prim-op node) *prelude-emitters*)
+                 node (ir-node-type node) (mapcar #'ir-node-type (ir-prim-args node)) a b c)))))
 
 (defparameter *arithmetic* '((:add :+ "add") (:sub :- "sub") (:mul :* "mul")))
 
@@ -578,23 +635,19 @@ a copy of the scrutinee if it is a global."
 
 ;;; Definitions
 
-(defun signature (def name params)
-  (format nil "static SHEAF_UNUSED ~a ~a(~:[void~;~:*~{~a~^, ~}~])"
-          (c-text (c-type (ir-def-result def))) name params))
-
 (defun emit-def (def)
+  "The C nodes of the function DEF: a comment, the function and a blank line."
   (let* ((*emit-def* def)
          (*self* (ir-def-name def))
          (*tail-used* nil)
          (*result-c-type* (c-type (ir-def-result def)))
          (*releases* (and (ir-def-pool def) (list (list :stack (ir-def-pool def) "pool_mark"))))
-         (name (c-name (ir-def-name def)))
          (params (loop :for (symbol . type) :in (ir-def-params def)
-                       :collect (cons (fresh-c-name symbol) (c-type type))))
-         (*params* params)
+                       :collect (list (c-type type) (fresh-c-name symbol))))
+         (*params* (loop :for (type name) :in params :collect (cons name type)))
          (env (loop :for (symbol) :in (ir-def-params def)
-                    :for (c-name) :in params
-                    :collect (cons symbol c-name)))
+                    :for (nil name) :in params
+                    :collect (cons symbol name)))
          (value-p (eq (ir-def-kind def) :value))
          (body (append
                 (when *releases*
@@ -605,89 +658,85 @@ a copy of the scrutinee if it is a global."
                                `((:assign ,(var "ready") (:int 1))
                                  (:return ,(var "value")))))
                       (t (emit-node (ir-def-body def) :return env))))))
-    (comment (symbol-name (ir-def-name def)))
-    (line "~a {" (signature def name (loop :for (c-name . type) :in params
-                                           :collect (format nil "~a ~a SHEAF_UNUSED" (c-text type) c-name))))
-    (print-c (append
-              (when value-p
+    `((:comment ,(symbol-name (ir-def-name def)))
+      (:fn ,*result-c-type* ,(c-name (ir-def-name def)) ,params
+           (,@(when value-p
                 `((:decl ,*result-c-type* "value" nil :static t)
                   (:decl (:name "int") "ready" nil :static t)
                   (:if ,(var "ready") ((:return ,(var "value"))))))
-              (when *tail-used* '((:label "top")))
-              body)
-             *out* 1)
-    (line "}")
-    (terpri *out*)))
+            ,@(when *tail-used* '((:label "top")))
+            ,@body))
+      (:blank))))
 
 (defun emit-main (lowered)
+  "The C node of `main`, which prints the root's result."
   (let* ((root (gethash (lowered-root lowered) (lowered-defs lowered)))
          (*emit-def* root)
          (call `(:call ,(c-name (lowered-root lowered)))))
     (when (ir-def-params root)
       (emit-error "a root that takes arguments"))
-    (line "int main(void) {")
-    (indented
-      (line "sheaf_reserve(sheaf_stacks, ~d);" (lowered-stack-count lowered))
-      (flet ((print-result (format type)
-               `(:call "printf" (:string ,format) (:cast (:name ,type) ,call))))
-        (line "~a;"
-              (case (numeric-kind (ir-type-name (ir-def-result root)))
-                (:wrap (print-result (format nil "%llu~%") "unsigned long long"))
-                (:trap (print-result (format nil "%lld~%") "long long"))
-                (:float (print-result (format nil "%.17g~%") "double"))
-                (t `(:cast (:name "void") ,call)))))
-      (line "return 0;"))
-    (line "}")))
+    (flet ((print-result (format type)
+             `(:call "printf" (:string ,format) (:cast (:name ,type) ,call))))
+      `(:fn (:name "int") "main" ()
+            ((:expr (:call "sheaf_reserve" (:name "sheaf_stacks") (:int ,(lowered-stack-count lowered))))
+             (:expr ,(case (numeric-kind (ir-type-name (ir-def-result root)))
+                       (:wrap (print-result (format nil "%llu~%") "unsigned long long"))
+                       (:trap (print-result (format nil "%lld~%") "long long"))
+                       (:float (print-result (format nil "%.17g~%") "double"))
+                       (t `(:cast (:name "void") ,call))))
+             (:return (:int 0)))
+            :public t))))
+
+(defun c-program (assigned)
+  "ASSIGNED, a program with its data stacks assigned, as a list of C nodes."
+  (check-assigned assigned)
+  (let ((*lowered* assigned)
+        (*c-types* (make-hash-table :test 'eq))
+        (*c-arrays* (make-hash-table :test 'equal))
+        (*c-names* (make-hash-table :test 'eq))
+        (*c-counter* 0)
+        (*emit-def* nil)
+        (defs (lowered-defs assigned))
+        (stacks (max 1 (lowered-stack-count assigned))))
+    (maphash (lambda (name def)
+               (declare (ignore def))
+               (setf (gethash name *c-names*) (fresh-c-name name)))
+             defs)
+    (maphash (lambda (type definition)
+               (declare (ignore definition))
+               (struct-name type))
+             (lowered-types assigned))
+    (let* ((prototypes (loop :for name :being :the :hash-keys :of defs :using (:hash-value def)
+                             :collect (let ((*emit-def* def))
+                                        `(:proto ,(c-type (ir-def-result def)) ,(c-name name)
+                                                 ,@(loop :for (nil . type) :in (ir-def-params def)
+                                                         :collect (c-type type))))))
+           (functions (loop :for def :being :the :hash-values :of defs
+                            :append (emit-def def)))
+           (main (emit-main assigned))
+           (types (type-definitions assigned)))
+      `((:comment "Generated by Sheaf.")
+        (:include "sheaf.h")
+        (:blank)
+        ,@(forward-declarations)
+        (:blank)
+        ,@(array-definitions '(:slice))
+        ,@types
+        ,@(array-definitions '(:array :grow :table))
+        (:blank)
+        (:decl (:name "sheaf_stack") "sheaf_stacks" nil :static t :array ,stacks)
+        (:decl (:name "sheaf_bank") "sheaf_banks" nil :static t :array ,stacks :unused t)
+        (:blank)
+        ,@prototypes
+        (:blank)
+        ,@functions
+        ,main))))
 
 (defun emit-c (assigned &optional stream)
   "ASSIGNED, a program with its data stacks assigned, as a C file that includes
 runtime/sheaf.h. Writes it to STREAM, or returns it as a string without one."
-  (check-assigned assigned)
   (if stream
-      (let ((*out* stream)
-            (*indent* 0)
-            (*lowered* assigned)
-            (*c-types* (make-hash-table :test 'eq))
-            (*c-arrays* (make-hash-table :test 'equal))
-            (*c-names* (make-hash-table :test 'eq))
-            (*c-counter* 0)
-            (*emit-def* nil))
-        (maphash (lambda (name def)
-                   (declare (ignore def))
-                   (setf (gethash name *c-names*) (fresh-c-name name)))
-                 (lowered-defs assigned))
-        (maphash (lambda (type definition)
-                   (declare (ignore definition))
-                   (struct-name type))
-                 (lowered-types assigned))
-        (let* ((body (with-output-to-string (*out*)
-                       (line "static sheaf_stack sheaf_stacks[~d];" (max 1 (lowered-stack-count assigned)))
-                       (line "static sheaf_bank sheaf_banks[~d] SHEAF_UNUSED;" (max 1 (lowered-stack-count assigned)))
-                       (terpri *out*)
-                       (maphash (lambda (name def)
-                                  (let ((*emit-def* def))
-                                    (line "~a;" (signature def (c-name name)
-                                                           (loop :for (nil . type) :in (ir-def-params def)
-                                                                 :collect (c-text (c-type type)))))))
-                                (lowered-defs assigned))
-                       (terpri *out*)
-                       (maphash (lambda (name def)
-                                  (declare (ignore name))
-                                  (emit-def def))
-                                (lowered-defs assigned))
-                       (emit-main assigned)))
-               (types (with-output-to-string (*out*)
-                        (emit-type-definitions assigned))))
-          (line "// Generated by Sheaf.")
-          (line "#include \"sheaf.h\"")
-          (terpri *out*)
-          (emit-forward-declarations)
-          (terpri *out*)
-          (emit-array-definitions '(:slice))
-          (write-string types *out*)
-          (emit-array-definitions '(:array :grow :table))
-          (terpri *out*)
-          (write-string body *out*)))
+      (print-c (c-program assigned) stream)
       (with-output-to-string (stream)
         (emit-c assigned stream))))
 
