@@ -2,7 +2,7 @@
 
 `emit-c` writes a program with its data stacks assigned ([STACKS.md](STACKS.md))
 as one C file. The file includes `runtime/sheaf.h`, which reserves the stacks.
-Expressions are built as s-expressions and printed ([C-AST.md](C-AST.md)).
+Function bodies are built as s-expressions and printed ([C-AST.md](C-AST.md)).
 
 ```lisp
 (let* ((ir (sheaf:lower (sheaf:defunctionalize (sheaf:monomorphize program 'my-package::main))))
