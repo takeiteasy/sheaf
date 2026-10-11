@@ -38,6 +38,7 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `vectors.lisp` | Vectors built locally and returned, and every operation on them |
 | `escape.lisp` | A function passed to raw Lisp, which defunctionalization rejects |
 
+`tests/c-ast.lisp` checks the C printer's parentheses and layout.
 `tests/emit.lisp` compiles the emitted C with `$CC` (default `cc`), so `make test` needs a C compiler.
 
 ## CI

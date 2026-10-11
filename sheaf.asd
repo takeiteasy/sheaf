@@ -31,6 +31,7 @@
                (:file "stacks")
                (:file "roots")
                (:file "interpret")
+               (:file "c-ast")
                (:file "emit"))
   :in-order-to ((asdf:test-op (asdf:test-op #:sheaf/tests))))
 
@@ -44,6 +45,7 @@
                (:file "defunctionalize")
                (:file "lower")
                (:file "stacks")
+               (:file "c-ast")
                (:file "emit")
                (:file "prelude")
                (:file "numbers")
