@@ -53,7 +53,7 @@ upper case."
                                 (sheaf:root-summary-stores (summary summaries "PUT")))))))
 
 (test the-existing-fixtures-pass-root-checking
-  (dolist (fixture '("counter" "closures" "flows" "recursive-data" "stacks" "tail" "arrays" "cells" "placement" "vectors" "hashtables"))
+  (dolist (fixture '("counter" "closures" "flows" "recursive-data" "stacks" "tail" "arrays" "cells" "placement" "vectors" "hashtables" "exceptions" "exceptions-stacks"))
     (is (hash-table-p (sheaf:check-roots (lowered fixture))) "~a" fixture)))
 
 (test a-store-names-the-reference-and-the-store
@@ -99,6 +99,11 @@ upper case."
     (destructuring-bind (reference match) (chain-texts condition)
       (is (equal "(arr:ref g 0)" reference))
       (is (eql 0 (search "(if " match))))))
+
+(test a-reference-cannot-outlive-the-body-of-a-catch
+  (let ((condition (root-error "ESCAPE-CAUGHT")))
+    (is-true condition)
+    (is (search "branch" (sheaf:specialization-error-message condition)))))
 
 (defun error-message (thunk)
   (handler-case (progn (funcall thunk) "")

@@ -23,6 +23,7 @@ on stacks the compiler assigns, and memory is freed when its scope ends.
 | [PRELUDE.md](docs/PRELUDE.md) | Arrays, slices and references |
 | [STACKS.md](docs/STACKS.md) | Assigning data stacks to cells and growable values |
 | [EMITTER.md](docs/EMITTER.md) | Emitting C and the data stack runtime |
+| [EXCEPTIONS.md](docs/EXCEPTIONS.md) | `throw`, `catch` and `protect` |
 | [C-AST.md](docs/C-AST.md) | The C s-expressions the emitter builds and prints |
 | [MONOMORPHIZATION.md](docs/MONOMORPHIZATION.md) | Specializing at ground types and removing dictionaries |
 | [COALTON.md](docs/COALTON.md) | The Coalton fork and how it is updated |

@@ -79,7 +79,7 @@ of the construct.
   code, such as the list `fold` reached through `map`, is an error:
   [#3](https://github.com/takeiteasy/sheaf/issues/3).
 - Partial application, keyword arguments, constructors used as functions and
-  the `catch`, `for` and `values` forms are errors:
+  the `for` and `values` forms are errors:
   [#10](https://github.com/takeiteasy/sheaf/issues/10).
 - A `Cell` captured by only one closure stays a separate value, not a field of
   that closure's case:

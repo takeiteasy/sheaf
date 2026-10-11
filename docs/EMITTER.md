@@ -107,11 +107,12 @@ A slice past either limit prints `bank space exhausted` or `a bank slice exhaust
 | A tail call to a function that tail calls back | A jump within one function that holds the whole cycle[^cycle] |
 | A global value | A function that computes it on first use |
 | A `match` | An `if` chain on the tags, ending in `sheaf_no_match()` |
+| A `throw`, `catch` or `protect` | Frames on a chain, with `_setjmp` and `_longjmp` ([EXCEPTIONS.md](EXCEPTIONS.md)) |
 
 ## Limitations
 
-- Exceptions, `unwind-protect` and restarts:
-  [#4](https://github.com/takeiteasy/sheaf/issues/4).
+- `handle`, `resumable` and `resume-to`:
+  [#24](https://github.com/takeiteasy/sheaf/issues/24).
 - Raw Lisp is an error: [#7](https://github.com/takeiteasy/sheaf/issues/7),
   [#3](https://github.com/takeiteasy/sheaf/issues/3).
 - A scalar type that is not a number, such as `Char` or `String`:

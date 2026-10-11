@@ -91,7 +91,13 @@ pool of its own holds."
                (ir-construct (and (not reaches) (pooled-p (ir-node-type node))))
                (ir-call (and (not reaches) (placement-ordinary (callee-placement node))))
                (ir-match (some (lambda (branch) (scan (ir-branch-body branch) reaches))
-                               (ir-match-branches node))))))
+                               (ir-match-branches node)))
+               (ir-throw nil)
+               (ir-catch (or (scan (ir-catch-body node) reaches)
+                             (some (lambda (branch) (scan (ir-catch-branch-body branch) reaches))
+                                   (ir-catch-branches node))))
+               (ir-protect (or (scan (ir-protect-body node) reaches)
+                               (scan (ir-protect-cleanup node) nil))))))
     (scan (ir-def-body def) (fresh-p (ir-def-name def)))))
 
 (defun builds-storage-p (def)
@@ -155,7 +161,20 @@ lets whose values reach the result."
                       (needs (ir-branch-body branch) reaches reached)
                     (setf ordinary (or ordinary branch-ordinary)
                           growables (max growables branch-growables)
-                          banked (or banked branch-banked))))))))
+                          banked (or banked branch-banked))))))
+    (ir-throw (values nil 0 nil))
+    (ir-catch (let ((ordinary nil) (growables 0) (banked nil))
+                (dolist (body (cons (ir-catch-body node) (mapcar #'ir-catch-branch-body (ir-catch-branches node)))
+                              (values ordinary growables banked))
+                  (multiple-value-bind (body-ordinary body-growables body-banked) (needs body reaches reached)
+                    (setf ordinary (or ordinary body-ordinary)
+                          growables (max growables body-growables)
+                          banked (or banked body-banked))))))
+    (ir-protect (multiple-value-bind (ordinary growables banked) (needs (ir-protect-body node) reaches reached)
+                  (multiple-value-bind (cleanup-ordinary cleanup-growables cleanup-banked)
+                      (needs (ir-protect-cleanup node) nil reached)
+                    (values (or ordinary cleanup-ordinary) (+ growables cleanup-growables)
+                            (or banked cleanup-banked)))))))
 
 (defun returns-own-name-p (let-node)
   "Whether LET-NODE ends by returning the value it binds."
@@ -173,7 +192,11 @@ lets whose values reach the result."
                 (tail-need (ir-let-value node))
                 (tail-need (ir-let-body node))))
     (ir-match (reduce #'max (ir-match-branches node) :key (lambda (branch) (tail-need (ir-branch-body branch)))
-                                                      :initial-value 0))))
+                                                      :initial-value 0))
+    (ir-throw 0)
+    (ir-catch (reduce #'max (cons (ir-catch-body node) (mapcar #'ir-catch-branch-body (ir-catch-branches node)))
+                      :key #'tail-need))
+    (ir-protect (tail-need (ir-protect-body node)))))
 
 (defun tail-banked-p (node)
   "Whether the growable values NODE returns need a bank."
@@ -182,7 +205,10 @@ lets whose values reach the result."
     (ir-call (placement-banked (callee-placement node)))
     (ir-let (tail-banked-p (if (returns-own-name-p node) (ir-let-value node) (ir-let-body node))))
     (ir-match (some (lambda (branch) (tail-banked-p (ir-branch-body branch)))
-                    (ir-match-branches node)))))
+                    (ir-match-branches node)))
+    (ir-throw nil)
+    (ir-catch (some #'tail-banked-p (cons (ir-catch-body node) (mapcar #'ir-catch-branch-body (ir-catch-branches node)))))
+    (ir-protect (tail-banked-p (ir-protect-body node)))))
 
 (defun def-placement (def)
   (multiple-value-bind (ordinary growables banked)
@@ -386,6 +412,34 @@ them out, the region its cycle allocates in, and the stacks in use on entry."
                                            (setf (ir-branch-body branch-copy)
                                                  (rewrite (ir-branch-body branch) reaches busy owned supply owned-bank))
                                            branch-copy)))
+                    copy))
+                 (ir-throw
+                  (let ((copy (copy-ir-throw node)))
+                    (setf (ir-throw-value copy) (rewrite-atom (ir-throw-value node)))
+                    copy))
+                 (ir-catch
+                  (let ((copy (copy-ir-catch node)))
+                    (setf (ir-catch-busy copy) busy
+                          (ir-catch-body copy) (rewrite (ir-catch-body node) reaches busy owned supply owned-bank)
+                          (ir-catch-branches copy)
+                          (loop :for branch :in (ir-catch-branches node)
+                                :collect (let ((branch-copy (copy-ir-catch-branch branch)))
+                                           (setf (ir-catch-branch-body branch-copy)
+                                                 (rewrite (ir-catch-branch-body branch) reaches busy owned supply owned-bank))
+                                           branch-copy)))
+                    copy))
+                 (ir-protect
+                  (let* ((cleanup (ir-protect-cleanup node))
+                         (stacks (take-stacks (tail-need cleanup) busy))
+                         (cleanup-bank (and (tail-banked-p cleanup)
+                                            (take-index (reduce #'with-index stacks :initial-value busy))))
+                         (inner (with-index (reduce #'with-index stacks :initial-value busy) cleanup-bank))
+                         (copy (copy-ir-protect node)))
+                    (setf (ir-protect-busy copy) busy
+                          (ir-protect-stacks copy) stacks
+                          (ir-protect-bank copy) cleanup-bank
+                          (ir-protect-body copy) (rewrite (ir-protect-body node) reaches busy owned supply owned-bank)
+                          (ir-protect-cleanup copy) (rewrite cleanup nil inner stacks supply cleanup-bank))
                     copy)))))
       (setf (ir-def-name new) clone
             (ir-def-source new) (ir-def-name def)

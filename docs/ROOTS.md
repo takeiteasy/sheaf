@@ -79,8 +79,8 @@ whatever those arrays hold[^inexact].
         (arr:set! outer 0 (arr:ref inner 0)))))   ; accepted: inner lives until the function returns
 ```
 
-A reference may not leave a `match` branch when it points into a growable
-value the branch frees. Arrays, `Cell`s and lists made in a branch live
+A reference may not leave a `match` branch, a `catch` body or branch, or a
+`protect` body when it points into a growable value that scope frees. Arrays, `Cell`s and lists made in a branch live
 until the function returns, so a reference to them may leave.
 
 ```lisp

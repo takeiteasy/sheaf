@@ -74,7 +74,14 @@ branch ends. REACHED holds the locals the result holds."
                     (collect (ir-let-body node) depth owner)))
                  (ir-match
                   (dolist (branch (ir-match-branches node))
-                    (collect (ir-branch-body branch) (1+ depth) owner))))))
+                    (collect (ir-branch-body branch) (1+ depth) owner)))
+                 (ir-throw nil)
+                 (ir-catch
+                  (dolist (body (cons (ir-catch-body node) (mapcar #'ir-catch-branch-body (ir-catch-branches node))))
+                    (collect body (1+ depth) owner)))
+                 (ir-protect
+                  (collect (ir-protect-body node) (1+ depth) owner)
+                  (collect (ir-protect-cleanup node) (1+ depth) owner)))))
       (collect node 0 -1))
     lifetimes))
 
@@ -151,7 +158,10 @@ is true a store that no caller could make safe is an error."
                    (ir-prim (walk-prim node env depth owner))
                    (ir-call (walk-call node env depth owner))
                    (ir-foreign (walk-foreign node env owner))
-                   (ir-match (walk-match node env depth owner)))))
+                   (ir-match (walk-match node env depth owner))
+                   (ir-throw '())
+                   (ir-catch (walk-catch node env depth owner))
+                   (ir-protect (walk-protect node env depth owner)))))
              (walk-all (atoms env depth owner)
                (apply #'merge-roots (mapcar (lambda (atom) (walk atom env depth owner)) atoms)))
              (walk-foreign (node env owner)
@@ -240,6 +250,29 @@ is true a store that no caller could make safe is an error."
                                branches)))
                      (setf result (merge-roots roots result))))
                  result))
+             (walk-scope (body what-entry env depth owner)
+               "The roots BODY, a branch of a catch or protect, gives back. When
+REPORT is true, notes that they must not outlive what BODY frees."
+               (let ((roots (walk body env (1+ depth) owner)))
+                 (when report
+                   (let ((tail (tail-node body)))
+                     (push (list roots depth
+                                 (list (list def-name (format nil "the reference of type ~a leaving the branch"
+                                                              (type-text (ir-node-type tail)))
+                                             (or (ir-node-location tail) *here*))
+                                       what-entry))
+                           branches)))
+                 roots))
+             (walk-catch (node env depth owner)
+               (let ((catch-entry (entry "the catch that receives it"))
+                     (result '()))
+                 (dolist (body (cons (ir-catch-body node) (mapcar #'ir-catch-branch-body (ir-catch-branches node)))
+                               result)
+                   (setf result (merge-roots (walk-scope body catch-entry env depth owner) result)))))
+             (walk-protect (node env depth owner)
+               (let ((roots (walk-scope (ir-protect-body node) (entry "the protect that receives it") env depth owner)))
+                 (walk (ir-protect-cleanup node) env (1+ depth) owner)
+                 roots))
              (branch-env (branch scrutinee env)
                (loop :for (name . type) :in (pattern-bindings (ir-branch-pattern branch))
                      :when (holds-storage-p type)

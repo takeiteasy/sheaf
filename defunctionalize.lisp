@@ -293,6 +293,15 @@ and RET shapes; a value has just RET."
     (ast:node-locally (list (ast:node-locally-subexpr node)))
     (ast:node-match (cons (ast:node-match-expr node)
                           (mapcar #'match-branch-body-of (ast:node-match-branches node))))
+    (ast:node-throw (list (ast:node-throw-expr node)))
+    (ast:node-protect (list (ast:node-protect-expr node) (ast:node-protect-cleanup node)))
+    (ast:node-catch
+     (when (ast:node-catch-in-place-p node)
+       (unsupported "handle: https://github.com/takeiteasy/sheaf/issues/24"))
+     (cons (ast:node-catch-expr node)
+           (mapcar #'ast:catch-branch-body (ast:node-catch-branches node))))
+    ((or ast:node-resumable ast:node-resume-to)
+     (unsupported "~(~a~) nodes: https://github.com/takeiteasy/sheaf/issues/24" (type-of node)))
     ;; TODO: only the node kinds the fixtures use; the rest signal an error.
     ;; https://github.com/takeiteasy/sheaf/issues/10
     (t (unsupported "~(~a~) nodes" (type-of node)))))
@@ -424,6 +433,13 @@ its sets are then free to differ per use."
                        (infer child env)))
     (ast:node-locally (infer (ast:node-locally-subexpr node) env))
     (ast:node-match (infer-match node env))
+    (ast:node-throw
+     (infer (ast:node-throw-expr node) env)
+     (shape-of (ast:node-type node)))
+    (ast:node-protect
+     (infer (ast:node-protect-cleanup node) env)
+     (infer (ast:node-protect-expr node) env))
+    (ast:node-catch (infer-catch node env))
     (ast:node-lisp (infer-lisp node env))
     (t (unsupported "~(~a~) nodes" (type-of node)))))
 
@@ -585,6 +601,16 @@ to; they are rebuilt where used, so are not captured."
         (if result
             (unify-shapes result shape)
             (setf result shape))))))
+
+(defun infer-catch (node env)
+  (when (ast:node-catch-in-place-p node)
+    (unsupported "handle: https://github.com/takeiteasy/sheaf/issues/24"))
+  (let ((result (infer (ast:node-catch-expr node) env)))
+    (dolist (branch (ast:node-catch-branches node) result)
+      (let ((pattern (ast:catch-branch-pattern branch)))
+        (unify-shapes result
+                      (infer (ast:catch-branch-body branch)
+                             (bind-pattern pattern (shape-of (pattern:pattern-type pattern)) env)))))))
 
 (defun bind-pattern (pattern shape env)
   (setf (gethash pattern *shapes*) shape)
@@ -1305,6 +1331,22 @@ FN is evaluated before ARGS, as in the call it replaces."
                         :collect (ast:make-match-branch
                                   :pattern (rewrite-pattern (ast:match-branch-pattern branch))
                                   :body (rewrite (ast:match-branch-body branch))))))
+      (ast:node-throw
+       (ast:make-node-throw :type (funcall ty) :location location
+                            :expr (rewrite (ast:node-throw-expr node))))
+      (ast:node-protect
+       (ast:make-node-protect :type (funcall ty) :location location
+                              :expr (rewrite (ast:node-protect-expr node))
+                              :cleanup (rewrite (ast:node-protect-cleanup node))))
+      (ast:node-catch
+       (ast:make-node-catch
+        :type (funcall ty) :location location :in-place-p nil
+        :expr (rewrite (ast:node-catch-expr node))
+        :branches (loop :for branch :in (ast:node-catch-branches node)
+                        :collect (ast:make-catch-branch
+                                  :exception-type (ast:catch-branch-exception-type branch)
+                                  :pattern (rewrite-pattern (ast:catch-branch-pattern branch))
+                                  :body (rewrite (ast:catch-branch-body branch))))))
       (ast:node-lisp node))))
 
 ;;; Driver

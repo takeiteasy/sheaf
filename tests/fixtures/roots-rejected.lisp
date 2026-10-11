@@ -189,6 +189,18 @@
                    (arr:ref base 0))))
         (ref:get r))))
 
+  (define-exception Boom
+    (Boom))
+
+  (declare escape-caught (Void -> UFix))
+  (define (escape-caught)
+    (let ((base (arr:new 1 0)))
+      (let ((r (catch (let ((g (the (GrowArray UFix) (grow:new))))
+                        (grow:push! g 7)
+                        (arr:ref g 0))
+                 ((Boom) (arr:ref base 0)))))
+        (ref:get r))))
+
   (declare escape-owned (Void -> UFix))
   (define (escape-owned)
     (let ((base (arr:new 1 0)))

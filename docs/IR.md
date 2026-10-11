@@ -39,6 +39,9 @@ bound by a `let` in evaluation order, left to right.
 | `ir-prim` | A primitive operation and atom arguments |
 | `ir-foreign` | Raw Lisp and the locals it reads[^foreign] |
 | `ir-match` | An atom and branches; a branch holds a pattern and a body |
+| `ir-throw` | An atom, an exception to throw ([EXCEPTIONS.md](EXCEPTIONS.md)) |
+| `ir-catch` | A body and branches; a branch holds an exception type and pattern, or neither, and a body |
+| `ir-protect` | A body and a cleanup |
 
 Patterns are `ir-pvar`, `ir-pwild`, `ir-plit`, `ir-pas` and `ir-pcon`. Every
 node has a type and a source location; a node without one takes its

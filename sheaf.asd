@@ -49,5 +49,6 @@
                (:file "emit")
                (:file "prelude")
                (:file "numbers")
-               (:file "roots"))
+               (:file "roots")
+               (:file "exceptions"))
   :perform (asdf:test-op (o c) (uiop:symbol-call '#:sheaf/tests '#:run)))

@@ -46,6 +46,10 @@
 (defstruct (ir-foreign (:include ir-node)) vars form)
 (defstruct (ir-match (:include ir-node)) scrutinee branches)
 (defstruct ir-branch pattern body)
+(defstruct (ir-throw (:include ir-node)) value)
+(defstruct (ir-catch (:include ir-node)) body branches (busy '()))
+(defstruct ir-catch-branch type pattern body)
+(defstruct (ir-protect (:include ir-node)) body cleanup (stacks '()) (bank nil) (busy '()))
 
 (defstruct (ir-pattern (:constructor nil))
   (type nil :type (or null ir-type)))
@@ -93,7 +97,13 @@ reaches, and its root."
        (walk-ir function arg)))
     (ir-match (walk-ir function (ir-match-scrutinee node))
               (dolist (branch (ir-match-branches node))
-                (walk-ir function (ir-branch-body branch))))))
+                (walk-ir function (ir-branch-body branch))))
+    (ir-throw (walk-ir function (ir-throw-value node)))
+    (ir-catch (walk-ir function (ir-catch-body node))
+              (dolist (branch (ir-catch-branches node))
+                (walk-ir function (ir-catch-branch-body branch))))
+    (ir-protect (walk-ir function (ir-protect-body node))
+                (walk-ir function (ir-protect-cleanup node)))))
 
 ;;; Primitives
 
@@ -153,6 +163,7 @@ reaches, and its root."
 (defvar *bindings*)
 (defvar *ir-types*)
 (defvar *pending-types*)
+(defvar *exception-sites* '() "Each exception type thrown or caught, the def and the location, for the payload check.")
 
 (defun lowering-error (control &rest args)
   (error 'specialization-error
@@ -317,6 +328,32 @@ reaches, and its root."
                                              :pattern (lower-pattern (ast:match-branch-pattern branch))
                                              :body (lower-body (ast:match-branch-body branch)))))))
 
+(defun note-exception-type (type)
+  "TYPE, an exception type thrown or caught here, once it is known to be a data type."
+  (unless (eq (ir-type-kind type) :data)
+    (lowering-error "the exception type ~a, which has no constructors" (type-text type)))
+  (push (list type (car *def*) *location*) *exception-sites*)
+  type)
+
+(defun lower-catch-branch (branch)
+  "A catch branch: an exception type and a pattern for the exception, or neither
+for a branch that catches every exception."
+  (let* ((pattern (ast:catch-branch-pattern branch))
+         (exception-type (ast:catch-branch-exception-type branch))
+         (catch-all (and (null exception-type) (typep pattern 'pattern:pattern-wildcard))))
+    (make-ir-catch-branch
+     :type (and (not catch-all)
+                (note-exception-type (lower-type (or exception-type (pattern:pattern-type pattern)))))
+     :pattern (if catch-all (make-ir-pwild) (lower-pattern pattern))
+     :body (lower-body (ast:catch-branch-body branch)))))
+
+(defun lower-catch (node)
+  (when (ast:node-catch-in-place-p node)
+    (lowering-error "handle: https://github.com/takeiteasy/sheaf/issues/24"))
+  (make-ir-catch :body (lower-body (ast:node-catch-expr node))
+                 :branches (mapcar #'lower-catch-branch (ast:node-catch-branches node))
+                 :type (lower-type (ast:node-type node)) :location *location*))
+
 (defun lower-simple (node)
   "The IR of NODE as an atom or one simple expression, after emitting a binding
 for everything it evaluates first."
@@ -348,6 +385,15 @@ for everything it evaluates first."
                :else :return (lower-simple child)))
       (ast:node-locally (lower-simple (ast:node-locally-subexpr node)))
       (ast:node-match (lower-match node))
+      (ast:node-throw
+       (let ((value (to-atom (ast:node-throw-expr node))))
+         (note-exception-type (ir-node-type value))
+         (make-ir-throw :value value :type (lower-type (ast:node-type node)) :location *location*)))
+      (ast:node-protect
+       (make-ir-protect :body (lower-body (ast:node-protect-expr node))
+                        :cleanup (lower-body (ast:node-protect-cleanup node))
+                        :type (lower-type (ast:node-type node)) :location *location*))
+      (ast:node-catch (lower-catch node))
       (ast:node-lisp
        (make-ir-foreign :vars (ast:node-lisp-vars node) :form (ast:node-lisp-form node)
                         :type (lower-type (ast:node-type node)) :location *location*))
@@ -373,6 +419,28 @@ for everything it evaluates first."
                      (lower-body node)
                      *location*))))
 
+(defun check-exception-payloads (lowered)
+  "Signal an error for an exception type that holds storage or a reference, or
+that contains itself: an exception is copied by value when thrown, and what a
+thrown value points to is freed while it unwinds."
+  (loop :for (exception name location) :in (reverse *exception-sites*)
+        :do (labels ((fail (what)
+                       (error 'specialization-error
+                              :message (format nil "Lowering does not support the exception type ~a, which holds ~a"
+                                               (type-text exception) what)
+                              :chain (list (list name (type-text exception) location))))
+                     (check (type path)
+                       (ecase (ir-type-kind type)
+                         (:scalar)
+                         ((:storage :view) (fail (type-text type)))
+                         (:data
+                          (when (member type path)
+                            (fail (format nil "~a, which contains itself" (type-text type))))
+                          (dolist (constructor (lowered-constructors lowered type))
+                            (dolist (field (ir-constructor-fields constructor))
+                              (check field (cons type path))))))))
+              (check exception '()))))
+
 (defun lower (specialized)
   "SPECIALIZED, a defunctionalized program, in Sheaf's IR."
   (check-defunctionalized specialized)
@@ -380,6 +448,7 @@ for everything it evaluates first."
          (*specialized* specialized)
          (*ir-types* (make-hash-table :test 'equal))
          (*pending-types* '())
+         (*exception-sites* '())
          (*prelude-primitives* (prelude-primitives))
          (*numeric-primitives* (numeric-primitives))
          (lowered (%make-lowered :root (specialized-root specialized))))
@@ -388,6 +457,7 @@ for everything it evaluates first."
                  (setf (gethash name (lowered-defs lowered)) (lower-def name node))))
              (specialized-bindings specialized))
     (build-type-table lowered)
+    (check-exception-payloads lowered)
     lowered))
 
 ;;; Checking
@@ -461,7 +531,16 @@ and primitive has its arity, and every operand is an atom. Returns T."
                    (check-atom (ir-match-scrutinee node) scope)
                    (dolist (branch (ir-match-branches node))
                      (check (ir-branch-body branch)
-                            (append (check-pattern (ir-branch-pattern branch)) scope)))))))
+                            (append (check-pattern (ir-branch-pattern branch)) scope))))
+                  (ir-throw (check-atom (ir-throw-value node) scope))
+                  (ir-catch
+                   (check (ir-catch-body node) scope)
+                   (dolist (branch (ir-catch-branches node))
+                     (check (ir-catch-branch-body branch)
+                            (append (check-pattern (ir-catch-branch-pattern branch)) scope))))
+                  (ir-protect
+                   (check (ir-protect-body node) scope)
+                   (check (ir-protect-cleanup node) scope)))))
        (check (ir-def-body def) (mapcar #'car (ir-def-params def)))))
    (lowered-defs lowered))
   t)

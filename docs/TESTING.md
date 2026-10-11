@@ -38,6 +38,9 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `placement.lisp` | Where storage is built when a result holds only some of it |
 | `vectors.lisp` | Vectors built locally and returned, and every operation on them |
 | `escape.lisp` | A function passed to raw Lisp, which defunctionalization rejects |
+| `exceptions.lisp` | Every kind of `catch` branch, nesting, rethrow and `protect` on both exits, on SBCL, the interpreter and in C |
+| `exceptions-stacks.lisp` | Throws that unwind cells and banked vectors in loops that exhaust their stacks if unwinding leaks |
+| `exceptions-rejected.lisp` | Exceptions that hold storage, and `handle` and `resumable`, which are errors |
 
 `tests/c-ast.lisp` checks the C printer's parentheses and layout.
 `tests/emit.lisp` compiles the emitted C with `$CC` (default `cc`), so `make test` needs a C compiler.

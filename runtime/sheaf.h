@@ -7,6 +7,7 @@
 #endif
 
 #include <math.h>
+#include <setjmp.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -40,6 +41,10 @@
 #if defined(__GNUC__) || defined(__clang__)
 #define SHEAF_UNUSED __attribute__((unused))
 #define SHEAF_NORETURN __attribute__((noreturn))
+#if !defined(__clang__)
+/* A handler only reads what it set before `_setjmp` and the result it assigns afterwards. */
+#pragma GCC diagnostic ignored "-Wclobbered"
+#endif
 #else
 #define SHEAF_UNUSED
 #define SHEAF_NORETURN
@@ -320,6 +325,38 @@ static SHEAF_UNUSED void sheaf_table_remove(sheaf_table *table, char *slots, siz
 
 static SHEAF_UNUSED SHEAF_NORETURN void sheaf_no_match(void) {
     fprintf(stderr, "no branch matches\n");
+    exit(1);
+}
+
+/* Exceptions. A `catch` or `protect` pushes a frame. A throw first finds the innermost catch with a
+   branch that matches, which nothing has unwound yet, then unwinds to it, landing in each protect
+   frame on the way. The thrown value is in the program's `sheaf_thrown`, which `match` reads. */
+typedef struct sheaf_frame {
+    struct sheaf_frame *prev;
+    int (*match)(int type); /* a catch's matching branch, or -1; NULL for a protect */
+    jmp_buf env;
+} sheaf_frame;
+
+static sheaf_frame *sheaf_frames, *sheaf_dest;
+static int sheaf_branch;
+
+/* Land in the next protect frame, or in the catch SHEAF_DEST that matched. */
+static SHEAF_UNUSED SHEAF_NORETURN void sheaf_unwind(void) {
+    while (sheaf_frames != sheaf_dest && sheaf_frames->match)
+        sheaf_frames = sheaf_frames->prev;
+    _longjmp(sheaf_frames->env, 1);
+}
+
+static SHEAF_UNUSED SHEAF_NORETURN void sheaf_throw(int type, const char *name) {
+    for (sheaf_frame *frame = sheaf_frames; frame; frame = frame->prev) {
+        int branch = frame->match ? frame->match(type) : -1;
+        if (branch >= 0) {
+            sheaf_dest = frame;
+            sheaf_branch = branch;
+            sheaf_unwind();
+        }
+    }
+    fprintf(stderr, "unhandled exception %s\n", name);
     exit(1);
 }
 

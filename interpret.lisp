@@ -67,6 +67,9 @@ that owner took it, and the cells pushed since."
                :finally (return (values t env)))
          (values nil env)))))
 
+(defvar *handlers* '()
+  "The catches being evaluated, innermost first, each its node, environment and tag.")
+
 (defun run-lowered (lowered)
   "Evaluate the root of LOWERED, a function of no arguments or a value. Raw Lisp
 cannot be evaluated: https://github.com/takeiteasy/sheaf/issues/3
@@ -263,8 +266,8 @@ the run touched when the program has a stack assignment."
              (enter (def env)
                (let ((pool (ir-def-pool def)))
                  (when pool (claim pool))
-                 (let ((value (evaluate (ir-def-body def) env)))
-                   (when pool (release pool))
+                 (let ((value (unwind-protect (evaluate (ir-def-body def) env)
+                                (when pool (release pool)))))
                    (live value (format nil "~s returned" (ir-def-name def))))))
              (force (name)
                (multiple-value-bind (value found) (gethash name globals)
@@ -281,8 +284,8 @@ the run touched when the program has a stack assignment."
                         (bank (ir-let-bank node)))
                     (mapc #'claim stacks)
                     (when bank (claim bank))
-                    (prog1 (evaluate (ir-let-body node)
-                                     (acons (ir-let-name node) (evaluate (ir-let-value node) env) env))
+                    (unwind-protect (evaluate (ir-let-body node)
+                                              (acons (ir-let-name node) (evaluate (ir-let-value node) env) env))
                       (when bank (release-bank bank))
                       (mapc #'release stacks))))
                  (ir-call
@@ -292,7 +295,7 @@ the run touched when the program has a stack assignment."
                                     :collect (cons name (evaluate arg env))))
                          (region (ir-call-region node)))
                     (when region (claim region))
-                    (prog1 (enter def env)
+                    (unwind-protect (enter def env)
                       (when region (release region)))))
                  (ir-construct
                   (let* ((args (mapcar (lambda (arg) (evaluate arg env)) (ir-construct-args node)))
@@ -314,7 +317,35 @@ the run touched when the program has a stack assignment."
                       (multiple-value-bind (matched branch-env)
                           (match-pattern (ir-branch-pattern branch) value env)
                         (when matched
-                          (return (evaluate (ir-branch-body branch) branch-env))))))))))
+                          (return (evaluate (ir-branch-body branch) branch-env)))))))
+                 (ir-throw
+                  (let ((value (evaluate (ir-throw-value node) env))
+                        (type (ir-node-type (ir-throw-value node))))
+                    (loop :for (handler catch-env tag) :in *handlers*
+                          :do (dolist (branch (ir-catch-branches handler))
+                                (when (or (null (ir-catch-branch-type branch)) (eq type (ir-catch-branch-type branch)))
+                                  (multiple-value-bind (matched branch-env)
+                                      (match-pattern (ir-catch-branch-pattern branch) value catch-env)
+                                    (when matched
+                                      (throw tag (list branch branch-env)))))))
+                    (error "Unhandled exception of type ~a" (type-text type))))
+                 (ir-catch
+                  (let* ((tag (list nil))
+                         (outcome (catch tag
+                                    (let ((*handlers* (cons (list node env tag) *handlers*)))
+                                      (list nil (evaluate (ir-catch-body node) env))))))
+                    (if (null (first outcome))
+                        (second outcome)
+                        (evaluate (ir-catch-branch-body (first outcome)) (second outcome)))))
+                 (ir-protect
+                  (unwind-protect (evaluate (ir-protect-body node) env)
+                    (let ((stacks (ir-protect-stacks node))
+                          (bank (ir-protect-bank node)))
+                      (mapc #'claim stacks)
+                      (when bank (claim bank))
+                      (unwind-protect (evaluate (ir-protect-cleanup node) env)
+                        (when bank (release-bank bank))
+                        (mapc #'release stacks))))))))
       (sb-int:with-float-traps-masked (:overflow :invalid :divide-by-zero :inexact)
         (let ((root (global (lowered-root lowered))))
           (when stacks

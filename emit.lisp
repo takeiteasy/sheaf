@@ -16,6 +16,8 @@
 (defvar *tail-calls* '() "The calls in tail position of the def being emitted that jump.")
 (defvar *def-tail-calls*)
 (defvar *def-cycle*)
+(defvar *aux* '() "The functions that expressions need defined before the defs, newest first.")
+(defvar *banks-used* nil "Whether the program has banks, which a handler gives back to when it unwinds.")
 
 (defun emit-error (control &rest args)
   (let ((location (and *emit-def* (ir-def-location *emit-def*))))
@@ -521,6 +523,19 @@ returns the expression."
 
 ;;; Statements
 
+(defun owned-marks (stacks bank)
+  "What a scope that owns STACKS and BANK gives back when it ends, each `:stack`
+or `:bank`, its index and the C variable holding its mark, and the declarations
+that save the marks."
+  (let ((owned (append (loop :for stack :in stacks
+                             :collect (list :stack stack (fresh-c-name (make-symbol "MARK"))))
+                       (and bank (list (list :bank bank (fresh-c-name (make-symbol "MARK"))))))))
+    (values owned
+            (loop :for (kind index mark) :in owned
+                  :collect (ecase kind
+                             (:stack `(:decl (:ptr (:name "char")) ,mark (:dot ,(stack-node index) "top") :unused t))
+                             (:bank `(:decl (:ptr (:name "sheaf_slice")) ,mark (:dot ,(bank-node index) "head") :unused t)))))))
+
 (defun emit-releases (releases)
   "The statements that give RELEASES back."
   (loop :for (kind index mark) :in releases
@@ -545,9 +560,11 @@ which `emit-node` can turn into jumps."
                  (ir-let (walk (ir-let-body node) (or owned (ir-let-stacks node) (ir-let-bank node))))
                  (ir-match (dolist (branch (ir-match-branches node))
                              (walk (ir-branch-body branch) owned)))
+                 (ir-catch (dolist (branch (ir-catch-branches node))
+                             (walk (ir-catch-branch-body branch) owned)))
                  (ir-call (unless (or owned (ir-call-region node))
                             (push node calls)))
-                 ((or ir-atom ir-prim ir-construct ir-foreign)))))
+                 ((or ir-atom ir-prim ir-construct ir-foreign ir-throw ir-protect)))))
       (when (eq (ir-def-kind def) :function)
         (walk (ir-def-body def) (ir-def-pool def))))
     calls))
@@ -632,27 +649,173 @@ a copy of the scrutinee if it is a global."
                     :do (setf chain (list `(:if ,test ,then ,chain))))
               chain))))
 
+;;; Exceptions
+
+(defun type-id (type)
+  "The number that identifies the data type TYPE at run time."
+  (struct-name type)
+  (gethash type *c-types*))
+
+(defun thrown (type)
+  "The C expression for the thrown value, which is of the exception type TYPE."
+  `(:dot (:dot ,(var "sheaf_thrown") "u") ,(format nil "e~d" (type-id type))))
+
+(defun emit-throw (node env)
+  (let ((type (ir-node-type (ir-throw-value node))))
+    `((:assign ,(thrown type) ,(atom-expr (ir-throw-value node) env))
+      (:expr (:call "sheaf_throw" (:int ,(type-id type)) (:string ,(type-text type)))))))
+
+;; TODO: saves every free stack, where the stacks the guarded expression can
+;; reach would do. https://github.com/takeiteasy/sheaf/issues/25
+;; TODO: cells the guarded expression builds in a stack in BUSY stay until its
+;; owner ends. https://github.com/takeiteasy/sheaf/issues/26
+(defun save-marks (busy)
+  "The declarations that save the top of each stack not in BUSY, and the bank
+head if the program has banks, and the statements that restore them. Nothing
+the stacks hold outside BUSY is live where a handler is entered."
+  (let ((saves '()) (restores '()))
+    (dotimes (index (lowered-stack-count *lowered*))
+      (unless (member index busy)
+        (let ((mark (fresh-c-name (make-symbol "MARK"))))
+          (push `(:decl (:ptr (:name "char")) ,mark (:dot ,(stack-node index) "top")) saves)
+          (push `(:assign (:dot ,(stack-node index) "top") ,(var mark)) restores))
+        (when *banks-used*
+          (let ((mark (fresh-c-name (make-symbol "MARK"))))
+            (push `(:decl (:ptr (:name "sheaf_slice")) ,mark (:dot ,(bank-node index) "head")) saves)
+            (push `(:expr (:call "sheaf_bank_release" (:addr ,(bank-node index)) ,(var mark))) restores)))))
+    (values (nreverse saves) (nreverse restores))))
+
+(defun open-frame (frame match)
+  "The statements that declare the frame FRAME and make it the innermost one."
+  `((:decl (:name "sheaf_frame") ,frame nil)
+    (:assign (:dot ,(var frame) "prev") ,(var "sheaf_frames"))
+    (:assign (:dot ,(var frame) "match") ,(or match '(:name "NULL")))
+    (:assign ,(var "sheaf_frames") (:addr ,(var frame)))))
+
+(defun close-frame (frame)
+  `(:assign ,(var "sheaf_frames") (:dot ,(var frame) "prev")))
+
+(defun guarded (frame body landing)
+  "An `if` that runs BODY with FRAME innermost, and runs LANDING if control lands in the frame."
+  `(:if (:== (:call "_setjmp" (:dot ,(var frame) "env")) (:int 0)) ,body ,landing))
+
+(defun catch-match-function (node name)
+  "The C function that picks the branch of the catch NODE that the thrown value matches."
+  `(:fn (:name "int") ,name (((:name "int") "type"))
+        (,@(loop :for branch :in (ir-catch-branches node)
+                 :for i :from 0
+                 :for type := (ir-catch-branch-type branch)
+                 :if type
+                   :collect (let ((tests (pattern-code (ir-catch-branch-pattern branch) (thrown type))))
+                              `(:if ,(reduce (lambda (a b) `(:&& ,a ,b)) tests
+                                             :initial-value `(:== ,(var "type") (:int ,(type-id type))))
+                                    ((:return (:int ,i)))))
+                 :else
+                   :collect `(:return (:int ,i))
+                   :and :do (loop-finish))
+         ,@(unless (find nil (ir-catch-branches node) :key #'ir-catch-branch-type)
+             '((:return (:int -1)))))))
+
+(defun emit-catch-branch (branch target env)
+  "The statements of BRANCH, which run with the thrown value bound by its pattern."
+  (let ((type (ir-catch-branch-type branch)))
+    (if (null type)
+        (emit-node (ir-catch-branch-body branch) target env)
+        (let ((exception (fresh-c-name (make-symbol "EXCEPTION")))
+              (declarations '()))
+          (multiple-value-bind (tests bindings) (pattern-code (ir-catch-branch-pattern branch) (var exception))
+            (declare (ignore tests))
+            (loop :for (name binding-type expression) :in bindings
+                  :do (let ((c-name (fresh-c-name name)))
+                        (push `(:decl ,(c-type binding-type) ,c-name ,expression :unused t) declarations)
+                        (push (cons name c-name) env))))
+          (append `((:decl ,(c-type type) ,exception ,(thrown type) :unused t))
+                  (nreverse declarations)
+                  (emit-node (ir-catch-branch-body branch) target env))))))
+
+(defun emit-catch (node target env)
+  "The statements that compute the catch NODE into TARGET: its body with a frame
+pushed, then the branch the thrown value matches if control lands in the frame."
+  (let* ((frame (fresh-c-name (make-symbol "FRAME")))
+         (match (fresh-c-name (make-symbol "MATCH")))
+         (result (if (eq target :return) (fresh-c-name (make-symbol "RESULT")) target))
+         (branches (ir-catch-branches node))
+         (dispatch (list '(:expr (:call "sheaf_no_match")))))
+    (push (catch-match-function node match) *aux*)
+    (loop :for branch :in (reverse branches)
+          :for i :downfrom (1- (length branches))
+          :do (setf dispatch `((:if (:== ,(var "sheaf_branch") (:int ,i))
+                                    ,(emit-catch-branch branch target env)
+                                    ,dispatch))))
+    (multiple-value-bind (saves restores) (save-marks (ir-catch-busy node))
+      `((:block
+          ,@saves
+          ,@(when (eq target :return) `((:decl ,(c-type (ir-node-type node)) ,result nil :unused t)))
+          ,@(open-frame frame (var match))
+          ,(guarded frame
+                    `(,@(emit-node (ir-catch-body node) result env)
+                      ,(close-frame frame)
+                      ,@(when (eq target :return) (emit-return (var result))))
+                    `(,(close-frame frame)
+                      ,@restores
+                      ,@dispatch)))))))
+
+(defun emit-protect (node target env)
+  "The statements that compute the protect NODE into TARGET: its body with a
+frame pushed, and its cleanup after the body returns and after control lands
+in the frame, which then goes on unwinding."
+  (let* ((frame (fresh-c-name (make-symbol "FRAME")))
+         (result (if (eq target :return) (fresh-c-name (make-symbol "RESULT")) target))
+         (saved (fresh-c-name (make-symbol "SAVED")))
+         (saved-dest (fresh-c-name (make-symbol "DEST")))
+         (saved-branch (fresh-c-name (make-symbol "BRANCH"))))
+    (flet ((cleanup ()
+             (multiple-value-bind (owned saves) (owned-marks (ir-protect-stacks node) (ir-protect-bank node))
+               (let ((discarded (fresh-c-name (make-symbol "DISCARDED"))))
+                 `((:block
+                     ,@saves
+                     (:decl ,(c-type (ir-node-type (ir-protect-cleanup node))) ,discarded nil :unused t)
+                     ,@(emit-node (ir-protect-cleanup node) discarded env)
+                     ,@(emit-releases owned)))))))
+      (multiple-value-bind (saves restores) (save-marks (ir-protect-busy node))
+        `((:block
+            ,@saves
+            ,@(when (eq target :return) `((:decl ,(c-type (ir-node-type node)) ,result nil :unused t)))
+            ,@(open-frame frame nil)
+            ,(guarded frame
+                      `(,@(emit-node (ir-protect-body node) result env)
+                        ,(close-frame frame)
+                        ,@(cleanup)
+                        ,@(when (eq target :return) (emit-return (var result))))
+                      `(,(close-frame frame)
+                        ,@restores
+                        (:decl (:struct "sheaf_exception") ,saved ,(var "sheaf_thrown"))
+                        (:decl (:ptr (:name "sheaf_frame")) ,saved-dest ,(var "sheaf_dest"))
+                        (:decl (:name "int") ,saved-branch ,(var "sheaf_branch"))
+                        ,@(cleanup)
+                        (:assign ,(var "sheaf_thrown") ,(var saved))
+                        (:assign ,(var "sheaf_dest") ,(var saved-dest))
+                        (:assign ,(var "sheaf_branch") ,(var saved-branch))
+                        (:expr (:call "sheaf_unwind"))))))))))
+
 (defun emit-node (node target env)
   "The statements that compute NODE into TARGET, a C variable or `:return`."
   (etypecase node
     (ir-let
-     (let* ((name (fresh-c-name (ir-let-name node)))
-            (bank (ir-let-bank node))
-            (owned (append (loop :for stack :in (ir-let-stacks node)
-                                 :collect (list :stack stack (fresh-c-name (make-symbol "MARK"))))
-                           (and bank (list (list :bank bank (fresh-c-name (make-symbol "MARK"))))))))
-       (append
-        (loop :for (kind index mark) :in owned
-              :collect (ecase kind
-                         (:stack `(:decl (:ptr (:name "char")) ,mark (:dot ,(stack-node index) "top")))
-                         (:bank `(:decl (:ptr (:name "sheaf_slice")) ,mark (:dot ,(bank-node index) "head")))))
-        `((:decl ,(c-type (ir-node-type (ir-let-value node))) ,name nil :unused t))
-        (emit-node (ir-let-value node) name env)
-        (let ((*releases* (append owned *releases*)))
-          (emit-node (ir-let-body node) target (acons (ir-let-name node) name env)))
-        (unless (eq target :return)
-          (emit-releases owned)))))
+     (let ((name (fresh-c-name (ir-let-name node))))
+       (multiple-value-bind (owned saves) (owned-marks (ir-let-stacks node) (ir-let-bank node))
+         (append
+          saves
+          `((:decl ,(c-type (ir-node-type (ir-let-value node))) ,name nil :unused t))
+          (emit-node (ir-let-value node) name env)
+          (let ((*releases* (append owned *releases*)))
+            (emit-node (ir-let-body node) target (acons (ir-let-name node) name env)))
+          (unless (eq target :return)
+            (emit-releases owned))))))
     (ir-match (emit-match node target env))
+    (ir-throw (emit-throw node env))
+    (ir-catch (emit-catch node target env))
+    (ir-protect (emit-protect node target env))
     ((or ir-atom ir-prim ir-construct ir-call ir-foreign)
      (if (and (eq target :return) (null *releases*) (member node *tail-calls* :test #'eq))
          (emit-tail-call node env)
@@ -680,7 +843,7 @@ A value stores its result in the static `value`."
                     :collect (cons symbol name))))
     (append
      (when *releases*
-       `((:decl (:ptr (:name "char")) "pool_mark" (:dot ,(stack-node (ir-def-pool def)) "top"))))
+       `((:decl (:ptr (:name "char")) "pool_mark" (:dot ,(stack-node (ir-def-pool def)) "top") :unused t)))
      (cond ((eq (ir-def-kind def) :value)
             (append (emit-node (ir-def-body def) "value" env)
                     (emit-releases *releases*)
@@ -792,6 +955,39 @@ for each def that enters it."
              (:return (:int 0)))
             :public t))))
 
+(defun scan-program (defs)
+  "The exception types DEFS throw or catch, whether any def throws, catches or
+protects, and whether any uses a bank."
+  (let ((types '()) (handlers nil) (banks nil))
+    (maphash (lambda (name def)
+               (declare (ignore name))
+               (when (ir-def-bank def) (setf banks t))
+               (walk-ir (lambda (node)
+                          (typecase node
+                            (ir-throw (setf handlers t)
+                             (pushnew (ir-node-type (ir-throw-value node)) types))
+                            (ir-catch (setf handlers t)
+                             (dolist (branch (ir-catch-branches node))
+                               (when (ir-catch-branch-type branch)
+                                 (pushnew (ir-catch-branch-type branch) types))))
+                            (ir-protect (setf handlers t)
+                             (when (ir-protect-bank node) (setf banks t)))
+                            (ir-let (when (ir-let-bank node) (setf banks t)))
+                            (ir-call (when (ir-call-bank node) (setf banks t)))
+                            (ir-prim (when (ir-prim-bank node) (setf banks t)))))
+                        (ir-def-body def)))
+             defs)
+    (values (nreverse types) handlers banks)))
+
+(defun exception-definitions (types)
+  "The C struct that holds the value being thrown, a union of the exception TYPES."
+  `((:struct-def "sheaf_exception"
+                 (:union "u" (:field (:name "char") "none")
+                         ,@(loop :for type :in types
+                                 :collect `(:field ,(c-type type) ,(format nil "e~d" (type-id type))))))
+    (:decl (:struct "sheaf_exception") "sheaf_thrown" nil :static t :unused t)
+    (:blank)))
+
 (defun c-program (assigned)
   "ASSIGNED, a program with its data stacks assigned, as a list of C nodes."
   (check-assigned assigned)
@@ -803,8 +999,13 @@ for each def that enters it."
         (*emit-def* nil)
         (*def-tail-calls* (make-hash-table :test 'eq))
         (*def-cycle* (make-hash-table :test 'eq))
+        (*aux* '())
+        (*banks-used* nil)
         (defs (lowered-defs assigned))
-        (stacks (max 1 (lowered-stack-count assigned))))
+        (stacks (max 1 (lowered-stack-count assigned)))
+        (exception-types '())
+        (handlers nil))
+    (multiple-value-setq (exception-types handlers *banks-used*) (scan-program defs))
     (maphash (lambda (name def)
                (declare (ignore def))
                (setf (gethash name *c-names*) (fresh-c-name name)))
@@ -840,8 +1041,10 @@ for each def that enters it."
         (:decl (:name "sheaf_stack") "sheaf_stacks" nil :static t :array ,stacks)
         (:decl (:name "sheaf_bank") "sheaf_banks" nil :static t :array ,stacks :unused t)
         (:blank)
+        ,@(when handlers (exception-definitions exception-types))
         ,@prototypes
         (:blank)
+        ,@(loop :for function :in (reverse *aux*) :append `(,function (:blank)))
         ,@functions
         ,main))))
 
