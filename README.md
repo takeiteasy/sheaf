@@ -1,7 +1,7 @@
 # sheaf
 
 > **Work in progress.** Programs compile from Coalton to C today, but only
-> for `UFix` and the data built from it. [STATUS.md](docs/STATUS.md) lists
+> for numbers and the data built from them. [STATUS.md](docs/STATUS.md) lists
 > what runs.
 
 **S**tatic **H**eapless **E**xpressions **A**s **F**orms. Sheaf is a
@@ -19,6 +19,7 @@ on stacks the compiler assigns, and memory is freed when its scope ends.
 | [PIPELINE.md](docs/PIPELINE.md) | The compiler's stages, and IR capture |
 | [IR.md](docs/IR.md) | The first-order IR the analyses read |
 | [ROOTS.md](docs/ROOTS.md) | Checking that references outlive their stores |
+| [NUMBERS.md](docs/NUMBERS.md) | Numeric types and what overflow does |
 | [PRELUDE.md](docs/PRELUDE.md) | Arrays, slices and references |
 | [STACKS.md](docs/STACKS.md) | Assigning data stacks to cells and growable values |
 | [EMITTER.md](docs/EMITTER.md) | Emitting C and the data stack runtime |

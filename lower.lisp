@@ -97,25 +97,33 @@ reaches, and its root."
 
 ;;; Primitives
 
-(defconstant +ufix-modulus+ (expt 2 63))
+;; Num, Eq and Ord methods of the numeric types, and Eq of Ordering, are
+;; primitives. The method of each class in the order it declares them:
+(defparameter *numeric-classes*
+  '((coalton/classes:num :add :sub :mul :from-int)
+    (coalton/classes:eq :eq)
+    (coalton/classes:ord :compare)))
 
-;; TODO: only the UFix operations and Ordering equality that the fixtures reach
-;; are primitive, and they are matched by the name of the instance method.
-;; Cover the other numeric types and the rest of Num, Eq and Ord.
-;; https://github.com/takeiteasy/sheaf/issues/12
-(defparameter *primitives*
-  (let ((table (make-hash-table :test 'equal)))
-    (loop :for (name op arity)
-            :in '(("INSTANCE/CLS:NUM UFIX-COALTON/CLASSES:+" :ufix-add 2)
-                  ("INSTANCE/CLS:NUM UFIX-COALTON/CLASSES:-" :ufix-sub 2)
-                  ("INSTANCE/CLS:NUM UFIX-COALTON/CLASSES:*" :ufix-mul 2)
-                  ("INSTANCE/CLS:NUM UFIX-COALTON/CLASSES:FROMINT" :ufix-from-int 1)
-                  ("INSTANCE/CLS:EQ UFIX-COALTON/CLASSES:==" :ufix-eq 2)
-                  ("INSTANCE/CLS:ORD UFIX-COALTON/CLASSES:<=>" :ufix-compare 2)
-                  ("INSTANCE/EQ ORDERING-COALTON/CLASSES:==" :ordering-eq 2))
-          :do (setf (gethash name table) (list op arity)))
-    table)
-  "Instance methods that lower to a `prim`, by name: the operation and its arity.")
+(defparameter *numeric-ops*
+  '((:add 2) (:sub 2) (:mul 2) (:from-int 1) (:eq 2) (:compare 2))
+  "The arity of each operation on numbers.")
+
+(defvar *numeric-primitives* (make-hash-table :test 'eq)
+  "The operation of each numeric instance method by origin, for the program being lowered.")
+
+(defun numeric-primitives ()
+  (let ((table (make-hash-table :test 'eq)))
+    (loop :for (class . ops) :in *numeric-classes*
+          :do (dolist (instance (tc:lookup-class-instances entry:*global-environment* class :no-error t))
+                (let ((type (first (tc:ty-predicate-types (tc:ty-class-instance-predicate instance)))))
+                  (when (and (tc:tycon-p type)
+                             (or (numeric-entry (tc:tycon-name type))
+                                 (and (eq class 'coalton/classes:eq)
+                                      (eq (tc:tycon-name type) 'coalton/classes:ordering))))
+                    (loop :for symbol :in (tc:ty-class-instance-method-codegen-syms instance)
+                          :for op :in ops
+                          :do (setf (gethash symbol table) op))))))
+    table))
 
 (defvar *specialized*)
 
@@ -125,12 +133,11 @@ reaches, and its root."
          (op (gethash origin *prelude-primitives*)))
     (if op
         (values op (second (assoc op *prelude-ops*)))
-        (values-list (gethash (symbol-name origin) *primitives*)))))
+        (let ((op (gethash origin *numeric-primitives*)))
+          (and op (values op (second (assoc op *numeric-ops*))))))))
 
 (defun primitive-arity (op)
-  (or (second (assoc op *prelude-ops*))
-      (loop :for (entry-op arity) :being :the :hash-values :of *primitives*
-            :when (eq op entry-op) :return arity)))
+  (second (or (assoc op *prelude-ops*) (assoc op *numeric-ops*))))
 
 (defun prelude-op-p (op)
   (and (assoc op *prelude-ops*) t))
@@ -177,7 +184,7 @@ reaches, and its root."
                                (tc:type-to-string type)))
              (when (and (eq name 'coalton/hashtable:hashtable)
                         (not (eq (ir-type-name (first (ir-type-args ir-type))) 'coalton:ufix)))
-               (lowering-error "the hashtable key type ~a: https://github.com/takeiteasy/sheaf/issues/12"
+               (lowering-error "the hashtable key type ~a: https://github.com/takeiteasy/sheaf/issues/20"
                                (tc:type-to-string type)))
              (setf (gethash key *ir-types*) ir-type)
              (when (eq kind :data)
@@ -253,6 +260,11 @@ reaches, and its root."
            (make-ir-local :name name :type type :location *location*))
           (t (lowering-error "the reference to ~s, which is not specialized" name)))))
 
+(defun literal-fit (name value)
+  (handler-case (fit name value)
+    (numeric-overflow ()
+      (lowering-error "the literal ~d, which does not fit ~a" value (symbol-name name)))))
+
 (defun lower-call (name rands type)
   (let ((args (mapcar #'to-atom rands))
         (type (lower-type type)))
@@ -262,8 +274,8 @@ reaches, and its root."
             (op
              (unless (= arity (length args))
                (lowering-error "a call of ~s with ~d arguments" name (length args)))
-             (if (and (eq op :ufix-from-int) (typep (first args) 'ir-literal))
-                 (make-ir-literal :value (mod (ir-literal-value (first args)) +ufix-modulus+)
+             (if (and (eq op :from-int) (typep (first args) 'ir-literal))
+                 (make-ir-literal :value (literal-fit (ir-type-name type) (ir-literal-value (first args)))
                                   :type type :location *location*)
                  (make-ir-prim :op op :args args :type type :location *location*)))
             ((lowered-global-p name)
@@ -369,6 +381,7 @@ for everything it evaluates first."
          (*ir-types* (make-hash-table :test 'equal))
          (*pending-types* '())
          (*prelude-primitives* (prelude-primitives))
+         (*numeric-primitives* (numeric-primitives))
          (lowered (%make-lowered :root (specialized-root specialized))))
     (maphash (lambda (name node)
                (unless (or (primitive-of name) (gethash name (specialized-passthrough specialized)))

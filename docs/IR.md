@@ -66,9 +66,11 @@ equal types are the same object.
 
 ## Primitives
 
-Instance methods in `*primitives*` become `ir-prim` and have no def: UFix
-`+`, `-`, `*`, `==`, `<=>` and `fromInt`, and `==` on `Ordering`. `fromInt` of
-a literal becomes a UFix literal.
+`Num`, `Eq` and `Ord` methods of the numeric types ([NUMBERS.md](NUMBERS.md))
+and `==` on `Ordering` become `ir-prim` and have no def. They are matched by
+class, method and type, and the operation is `:add`, `:sub`, `:mul`,
+`:from-int`, `:eq` or `:compare`; the type of the operands gives its meaning.
+`fromInt` of a literal becomes a literal of the type.
 
 The operations of the prelude ([PRELUDE.md](PRELUDE.md)) are `ir-prim`s as
 well. An allocating one holds the stack it pushes to in `ir-prim-stack`.
@@ -78,8 +80,8 @@ well. An allocating one holds the stack it pushes to in `ir-prim-stack`.
 - Raw Lisp in the standard library stays `ir-foreign`, which `run-lowered`
   and the emitter reject: [#3](https://github.com/takeiteasy/sheaf/issues/3),
   [#7](https://github.com/takeiteasy/sheaf/issues/7).
-- Other numeric types and operations are not primitives:
-  [#12](https://github.com/takeiteasy/sheaf/issues/12).
+- `Integral`, `Reciprocable`, `Bits` and `Bit` are not primitives:
+  [#21](https://github.com/takeiteasy/sheaf/issues/21).
 - A recursive `let` or the node kinds defunctionalization rejects are
   errors: [#10](https://github.com/takeiteasy/sheaf/issues/10).
 - `Cell` functions other than `new`, `read`, `write!` and `swap!`, such as
@@ -87,8 +89,6 @@ well. An allocating one holds the stack it pushes to in `ir-prim-stack`.
   `pop!`, `index`, `index-unsafe`, `set!` and `length`, and `Hashtable`
   functions other than `new`, `with-capacity`, `get`, `set!`, `remove!` and
   `count`: [#3](https://github.com/takeiteasy/sheaf/issues/3).
-- `UFix` is unsigned 63-bit, and overflow is unspecified:
-  [#1](https://github.com/takeiteasy/sheaf/issues/1).
 
 [^foreign]: The standard library mixes raw Lisp with Coalton's own runtime
     representations, such as `Optional` and `Cell`, so a fragment cannot run

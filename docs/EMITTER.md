@@ -13,7 +13,7 @@ as one C file. The file includes `runtime/sheaf.h`, which reserves the stacks.
 cc -std=c11 -I runtime main.c -o main && ./main
 ```
 
-The program prints its root's result when that is a `UFix`.
+The program prints its root's result when that is a number.
 
 ## Example
 
@@ -50,7 +50,7 @@ The excerpt omits `SHEAF_UNUSED` attributes and temporaries.
 
 | IR type | C |
 |---|---|
-| `UFix` | `uint64_t` |
+| A numeric type | Its C type ([NUMBERS.md](NUMBERS.md)) |
 | A data type that contains itself | `struct Tn *`, a cell on a data stack[^links] |
 | Any other data type | `struct Tn` by value: a `tag` and a union of the constructors' fields |
 | `FixedArray`, `Array` | `struct An *`: a `length` and the elements[^layout] |
@@ -107,12 +107,9 @@ A slice past either limit prints `bank space exhausted` or `a bank slice exhaust
   [#4](https://github.com/takeiteasy/sheaf/issues/4).
 - Raw Lisp is an error: [#7](https://github.com/takeiteasy/sheaf/issues/7),
   [#3](https://github.com/takeiteasy/sheaf/issues/3).
-- `hashtable:count` returns an `Integer`, which is an emit error:
-  [#12](https://github.com/takeiteasy/sheaf/issues/12). So is a `with-capacity` or
-  `make` whose capacity is not a literal.
-- Only `UFix` and the data types built from it are emitted:
-  [#12](https://github.com/takeiteasy/sheaf/issues/12).
-- `UFix` arithmetic wraps at 64 bits: [#1](https://github.com/takeiteasy/sheaf/issues/1).
+- A scalar type that is not a number, such as `Char` or `String`:
+  [#22](https://github.com/takeiteasy/sheaf/issues/22).
+- `Integer` is 64 bits: [#19](https://github.com/takeiteasy/sheaf/issues/19).
 - Cells are linked by pointers, not relative references:
   [#13](https://github.com/takeiteasy/sheaf/issues/13).
 

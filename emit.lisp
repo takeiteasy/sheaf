@@ -52,9 +52,6 @@
 
 ;;; Types
 
-(defun ufix-type-p (type)
-  (eq (ir-type-name type) (find-symbol "UFIX" "COALTON")))
-
 (defun struct-name (type)
   (format nil "T~d" (or (gethash type *c-types*)
                         (setf (gethash type *c-types*) (hash-table-count *c-types*)))))
@@ -80,9 +77,8 @@
 
 (defun c-type (type)
   (ecase (ir-type-kind type)
-    (:scalar (if (ufix-type-p type)
-                 "uint64_t"
-                 (emit-error "the type ~a: https://github.com/takeiteasy/sheaf/issues/12" (type-text type))))
+    (:scalar (or (numeric-c-type (ir-type-name type))
+                 (emit-error "the type ~a: https://github.com/takeiteasy/sheaf/issues/22" (type-text type))))
     ((:storage :view)
      (let ((layout (storage-layout type)))
        (case layout
@@ -138,10 +134,26 @@
 
 ;;; Expressions
 
+(defun float-literal (value bits)
+  (cond ((float-features:float-nan-p value) "NAN")
+        ((float-features:float-infinity-p value) (if (plusp value) "INFINITY" "(-INFINITY)"))
+        (t (multiple-value-bind (mantissa exponent sign) (integer-decode-float value)
+             (format nil "~:[~;-~]0x~xp~d~:[~;f~]" (minusp sign) mantissa exponent (= bits 32))))))
+
 (defun c-literal (value type)
-  (unless (and (integerp value) (ufix-type-p type) (< -1 value (expt 2 64)))
-    (emit-error "the literal ~s of type ~a" value (type-text type)))
-  (format nil "UINT64_C(~d)" value))
+  (let* ((name (ir-type-name type))
+         (bits (numeric-bits name)))
+    (case (numeric-kind name)
+      (:wrap (when (typep value `(unsigned-byte ,bits))
+               (return-from c-literal (format nil "UINT~d_C(~d)" bits value))))
+      (:trap (when (typep value `(signed-byte ,bits))
+               (return-from c-literal
+                 (if (= value (- (expt 2 63)))
+                     "(-INT64_C(9223372036854775807) - 1)"
+                     (format nil "INT~d_C(~d)" bits value)))))
+      (:float (when (floatp value)
+                (return-from c-literal (float-literal value bits)))))
+    (emit-error "the literal ~s of type ~a" value (type-text type))))
 
 (defun atom-expr (node env)
   (etypecase node
@@ -186,8 +198,7 @@ and return its C variable."
 (defun prelude-expr (node env)
   "A C expression for the prelude operation NODE, after writing any statements it needs."
   (let* ((op (ir-prim-op node))
-         (args (unless (eq op :hashtable-with-capacity)
-                 (mapcar (lambda (arg) (atom-expr arg env)) (ir-prim-args node))))
+         (args (mapcar (lambda (arg) (atom-expr arg env)) (ir-prim-args node)))
          (arg-types (mapcar #'ir-node-type (ir-prim-args node)))
          (type (ir-node-type node)))
     (labels ((unit () (constructor-literal type "UNIT"))
@@ -308,11 +319,7 @@ and return its C variable."
                (line "*~a = ~a;" a b)
                old))
             (:hashtable-new (new-table 0))
-            (:hashtable-with-capacity
-             (let ((hint (first (ir-prim-args node))))
-               (unless (and (typep hint 'ir-literal) (integerp (ir-literal-value hint)) (<= 0 (ir-literal-value hint)))
-                 (emit-error "a hash table capacity that is not a literal: https://github.com/takeiteasy/sheaf/issues/12"))
-               (new-table (format nil "UINT64_C(~d)" (ir-literal-value hint)))))
+            (:hashtable-with-capacity (new-table (format nil "(~a < 0 ? UINT64_C(0) : (uint64_t)~a)" a a)))
             (:hashtable-get
              (let ((found (fresh-c-name (make-symbol "FOUND"))))
                (line "uint64_t ~a = sheaf_table_find(&(~a)->table, ~a, ~a, ~a);"
@@ -329,27 +336,47 @@ and return its C variable."
             (:hashtable-remove
              (line "sheaf_table_remove(&(~a)->table, ~a, ~a, ~a);" a (table-slots a) (table-slot a) b)
              (unit))
-            (:hashtable-count (format nil "(~a)->table.count" a))))))))
+            (:hashtable-count (format nil "(int64_t)(~a)->table.count" a))))))))
+
+(defparameter *arithmetic* '((:add "+" "add") (:sub "-" "sub") (:mul "*" "mul")))
+
+(defun arithmetic-expr (op name a b)
+  (destructuring-bind (operator function) (rest (assoc op *arithmetic*))
+    (let ((bits (numeric-bits name))
+          (c-type (numeric-c-type name)))
+      (ecase (numeric-kind name)
+        (:wrap (if (= bits 64)
+                   (format nil "(~a ~a ~a)" a operator b)
+                   (format nil "(~a)((uint64_t)~a ~a (uint64_t)~a)" c-type a operator b)))
+        (:trap (format nil "sheaf_~a_i~d(~a, ~a)" function bits a b))
+        (:float (format nil "(~a)(~a ~a ~a)" c-type a operator b))))))
+
+(defun conversion-expr (name a)
+  (let ((bits (numeric-bits name))
+        (c-type (numeric-c-type name)))
+    (ecase (numeric-kind name)
+      ((:wrap :float) (format nil "(~a)~a" c-type a))
+      (:trap (if (= bits 64) a (format nil "sheaf_fit_i~d(~a)" bits a))))))
 
 (defun prim-expr (node env)
   (when (prelude-op-p (ir-prim-op node))
     (return-from prim-expr (prelude-expr node env)))
   (destructuring-bind (&optional a b) (mapcar (lambda (arg) (atom-expr arg env)) (ir-prim-args node))
-    (let ((type (ir-node-type node)))
-      (flet ((tag (name) (ir-constructor-tag (named-constructor *lowered* type name)))
+    (let* ((type (ir-node-type node))
+           (name (ir-type-name type)))
+      (flet ((tag (constructor) (ir-constructor-tag (named-constructor *lowered* type constructor)))
              (boolean (test)
                (format nil "(~a){ .tag = ~a ? ~d : ~d }" (c-type type) test
                        (ir-constructor-tag (named-constructor *lowered* type "TRUE"))
                        (ir-constructor-tag (named-constructor *lowered* type "FALSE")))))
         (ecase (ir-prim-op node)
-          (:ufix-add (format nil "(~a + ~a)" a b))
-          (:ufix-sub (format nil "(~a - ~a)" a b))
-          (:ufix-mul (format nil "(~a * ~a)" a b))
-          (:ufix-eq (boolean (format nil "~a == ~a" a b)))
-          (:ufix-compare (format nil "(~a){ .tag = ~a < ~a ? ~d : ~a > ~a ? ~d : ~d }"
-                                 (c-type type) a b (tag "LT") a b (tag "GT") (tag "EQ")))
-          (:ordering-eq (boolean (format nil "~a.tag == ~a.tag" a b)))
-          (:ufix-from-int (emit-error "a conversion of a value that is not a literal: https://github.com/takeiteasy/sheaf/issues/1")))))))
+          ((:add :sub :mul) (arithmetic-expr (ir-prim-op node) name a b))
+          (:from-int (conversion-expr name a))
+          (:eq (boolean (if (numeric-entry (ir-type-name (ir-node-type (first (ir-prim-args node)))))
+                            (format nil "~a == ~a" a b)
+                            (format nil "~a.tag == ~a.tag" a b))))
+          (:compare (format nil "(~a){ .tag = ~a < ~a ? ~d : ~a > ~a ? ~d : ~d }"
+                            (c-type type) a b (tag "LT") a b (tag "GT") (tag "EQ"))))))))
 
 (defun construct-expr (node env)
   (let* ((type (ir-node-type node))
@@ -557,9 +584,11 @@ symbol, a type and the expression for its value."
     (line "int main(void) {")
     (indented
       (line "sheaf_reserve(sheaf_stacks, ~d);" (lowered-stack-count lowered))
-      (cond ((ufix-type-p (ir-def-result root))
-             (line "printf(\"%llu\\n\", (unsigned long long)~a);" call))
-            (t (line "(void)~a;" call)))
+      (case (numeric-kind (ir-type-name (ir-def-result root)))
+        (:wrap (line "printf(\"%llu\\n\", (unsigned long long)~a);" call))
+        (:trap (line "printf(\"%lld\\n\", (long long)~a);" call))
+        (:float (line "printf(\"%.17g\\n\", (double)~a);" call))
+        (t (line "(void)~a;" call)))
       (line "return 0;"))
     (line "}")))
 

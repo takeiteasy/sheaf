@@ -87,8 +87,10 @@ and exit code."
     (multiple-value-bind (compiled interpreted) (c-result-from "hashtables" root)
       (is (= interpreted compiled) "~a" root))))
 
-(test a-hash-table-count-is-not-emitted-until-integers-are
-  (is (search "sheaf/issues/12" (error-text (lambda () (sheaf:emit-c (sheaf:assign-stacks (lowered-from "hashtables" "COUNTED"))))))))
+(test a-hash-table-count-and-a-computed-capacity-match-the-interpreter-in-c
+  (dolist (root '("COUNTED" "MAIN-SIZED"))
+    (multiple-value-bind (compiled interpreted) (c-result-from "hashtables" root)
+      (is (= interpreted compiled) "~a" root))))
 
 (defparameter *small-banks* '("-DSHEAF_SLICE_SIZE=65536" "-DSHEAF_BANK_SPACE=524288")
   "Eight slices of bank space.")

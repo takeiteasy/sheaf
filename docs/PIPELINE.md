@@ -54,7 +54,7 @@ that expands to it, such as `assert`.
 - Exceptions and mutual tail calls in C:
   [#4](https://github.com/takeiteasy/sheaf/issues/4),
   [#5](https://github.com/takeiteasy/sheaf/issues/5).
-- `Integer` and overflow semantics: [#1](https://github.com/takeiteasy/sheaf/issues/1).
+- `Integer` is 64 bits: [#19](https://github.com/takeiteasy/sheaf/issues/19).
 
 [^loc]: Nodes returned by Coalton's `translate-expression` and every
     top-level binding have a location. Nodes a translation helper builds

@@ -130,7 +130,7 @@
   (let ((condition (handler-case (lowered-from "hashtables" "BOOLEAN-KEYS")
                      (sheaf:specialization-error (condition) condition))))
     (is (typep condition 'sheaf:specialization-error))
-    (is (search "/sheaf/issues/12" (sheaf:specialization-error-message condition)))))
+    (is (search "/sheaf/issues/20" (sheaf:specialization-error-message condition)))))
 
 (test a-returned-cell-is-built-in-the-destination
   (let ((clone (first (clones "cells" "FRESH-CELL"))))

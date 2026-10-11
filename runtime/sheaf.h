@@ -6,6 +6,7 @@
 #define _DEFAULT_SOURCE
 #endif
 
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -56,6 +57,43 @@ static SHEAF_UNUSED SHEAF_NORETURN void sheaf_exhausted(sheaf_stack *stack) {
         fprintf(stderr, "data stack %d exhausted\n", stack->index);
     exit(1);
 }
+
+static SHEAF_UNUSED SHEAF_NORETURN void sheaf_overflow(void) {
+    fprintf(stderr, "integer overflow\n");
+    exit(1);
+}
+
+#define SHEAF_CHECKED(bits)                                                     \
+    static SHEAF_UNUSED int##bits##_t sheaf_add_i##bits(int##bits##_t a, int##bits##_t b) { \
+        int##bits##_t r;                                                        \
+        if (__builtin_add_overflow(a, b, &r)) sheaf_overflow();                 \
+        return r;                                                               \
+    }                                                                           \
+    static SHEAF_UNUSED int##bits##_t sheaf_sub_i##bits(int##bits##_t a, int##bits##_t b) { \
+        int##bits##_t r;                                                        \
+        if (__builtin_sub_overflow(a, b, &r)) sheaf_overflow();                 \
+        return r;                                                               \
+    }                                                                           \
+    static SHEAF_UNUSED int##bits##_t sheaf_mul_i##bits(int##bits##_t a, int##bits##_t b) { \
+        int##bits##_t r;                                                        \
+        if (__builtin_mul_overflow(a, b, &r)) sheaf_overflow();                 \
+        return r;                                                               \
+    }
+
+SHEAF_CHECKED(8)
+SHEAF_CHECKED(16)
+SHEAF_CHECKED(32)
+SHEAF_CHECKED(64)
+
+#define SHEAF_FIT(bits)                                                         \
+    static SHEAF_UNUSED int##bits##_t sheaf_fit_i##bits(int64_t x) {            \
+        if (x != (int##bits##_t)x) sheaf_overflow();                            \
+        return (int##bits##_t)x;                                                \
+    }
+
+SHEAF_FIT(8)
+SHEAF_FIT(16)
+SHEAF_FIT(32)
 
 static SHEAF_UNUSED void sheaf_reserve(sheaf_stack *stacks, int count) {
     for (int i = 0; i < count; i++) {

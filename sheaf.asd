@@ -23,6 +23,7 @@
   :serial t
   :components ((:file "package")
                (:file "ir")
+               (:file "numbers")
                (:file "monomorphize")
                (:file "prelude-ops")
                (:file "defunctionalize")
@@ -45,5 +46,6 @@
                (:file "stacks")
                (:file "emit")
                (:file "prelude")
+               (:file "numbers")
                (:file "roots"))
   :perform (asdf:test-op (o c) (uiop:symbol-call '#:sheaf/tests '#:run)))

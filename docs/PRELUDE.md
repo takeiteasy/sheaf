@@ -70,9 +70,7 @@ stack when it grows.
 ## Limitations
 
 - A `HashTable` key other than `UFix` is a lowering error:
-  [#12](https://github.com/takeiteasy/sheaf/issues/12).
-- Elements other than `UFix` and the data types built from it have no
-  primitives: [#12](https://github.com/takeiteasy/sheaf/issues/12).
+  [#20](https://github.com/takeiteasy/sheaf/issues/20).
 - `Vector` and `HashTable` functions other than the ones above, such as
   `entries`, `keys` and `extend!`, hold raw Lisp:
   [#3](https://github.com/takeiteasy/sheaf/issues/3).

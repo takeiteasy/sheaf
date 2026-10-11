@@ -103,6 +103,18 @@
             ((None) 0))
           (table-total rest)))))
 
+  (declare sized (Integer -> UFix))
+  (define (sized n)
+    (let ((h (the (hashtable:HashTable UFix UFix) (hashtable:with-capacity (* n 2)))))
+      (hashtable:set! h 1 7)
+      (match (hashtable:get h 1)
+        ((Some x) x)
+        ((None) 0))))
+
+  (declare main-sized (Void -> UFix))
+  (define (main-sized)
+    (sized 4))
+
   (declare main-tables (Void -> UFix))
   (define (main-tables)
     (table-total (tables-down 3)))
