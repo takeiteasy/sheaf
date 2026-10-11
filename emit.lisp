@@ -9,11 +9,13 @@
 (defvar *c-names*)
 (defvar *c-counter*)
 (defvar *emit-def* nil "The def being emitted, for errors.")
-(defvar *self*)
-(defvar *params*)
 (defvar *releases* '() "What to give back on return, each `:stack` or `:bank`, its index and the C variable holding its mark.")
 (defvar *result-c-type*)
 (defvar *tail-used*)
+(defvar *jumps* '() "Where a tail call goes: the callee's name, its label and its parameters, each a C type and name.")
+(defvar *tail-calls* '() "The calls in tail position of the def being emitted that jump.")
+(defvar *def-tail-calls*)
+(defvar *def-cycle*)
 
 (defun emit-error (control &rest args)
   (let ((location (and *emit-def* (ir-def-location *emit-def*))))
@@ -534,25 +536,52 @@ returns the expression."
           (:return ,(var result))))
       `((:return ,expression))))
 
-(defun self-tail-call-p (node)
-  (and (typep node 'ir-call)
-       (eq (ir-call-function node) *self*)
-       (null (ir-call-region node))
-       (null *releases*)))
+(defun tail-calls (def)
+  "The calls in tail position of DEF that nothing needs to be given back after,
+which `emit-node` can turn into jumps."
+  (let ((calls '()))
+    (labels ((walk (node owned)
+               (etypecase node
+                 (ir-let (walk (ir-let-body node) (or owned (ir-let-stacks node) (ir-let-bank node))))
+                 (ir-match (dolist (branch (ir-match-branches node))
+                             (walk (ir-branch-body branch) owned)))
+                 (ir-call (unless (or owned (ir-call-region node))
+                            (push node calls)))
+                 ((or ir-atom ir-prim ir-construct ir-foreign)))))
+      (when (eq (ir-def-kind def) :function)
+        (walk (ir-def-body def) (ir-def-pool def))))
+    calls))
+
+(defun find-tail-cycles (defs)
+  "Fill `*def-tail-calls*` with the calls of each def in DEFS that jump to a def
+in its own cycle of tail calls, and `*def-cycle*` with each def's cycle, the
+names of the defs that tail call each other."
+  (let ((calls (make-hash-table :test 'eq)))
+    (maphash (lambda (name def) (setf (gethash name calls) (tail-calls def))) defs)
+    (dolist (cycle (strongly-connected-components
+                    (loop :for name :being :the :hash-keys :of defs :collect name)
+                    (lambda (name)
+                      (remove-duplicates (mapcar #'ir-call-function (gethash name calls))))))
+      (dolist (name cycle)
+        (setf (gethash name *def-cycle*) cycle
+              (gethash name *def-tail-calls*)
+              (remove-if-not (lambda (call) (member (ir-call-function call) cycle))
+                             (gethash name calls)))))))
 
 (defun emit-tail-call (node env)
   (setf *tail-used* t)
-  (let ((temps (loop :for arg :in (ir-call-args node)
-                     :collect (fresh-c-name (make-symbol "ARG")))))
-    `((:block
-        ,@(loop :for arg :in (ir-call-args node)
-                :for (nil . type) :in *params*
-                :for temp :in temps
-                :collect `(:decl ,type ,temp ,(atom-expr arg env)))
-        ,@(loop :for (name) :in *params*
-                :for temp :in temps
-                :collect `(:assign ,(var name) ,(var temp)))
-        (:goto "top")))))
+  (destructuring-bind (label params) (rest (assoc (ir-call-function node) *jumps*))
+    (let ((temps (loop :for nil :in params
+                       :collect (fresh-c-name (make-symbol "ARG")))))
+      `((:block
+          ,@(loop :for arg :in (ir-call-args node)
+                  :for (type) :in params
+                  :for temp :in temps
+                  :collect `(:decl ,type ,temp ,(atom-expr arg env)))
+          ,@(loop :for (nil name) :in params
+                  :for temp :in temps
+                  :collect `(:assign ,(var name) ,(var temp)))
+          (:goto ,label))))))
 
 (defun pattern-code (pattern access)
   "The C tests that ACCESS matches PATTERN and the variables it binds, each a
@@ -625,7 +654,7 @@ a copy of the scrutinee if it is a global."
           (emit-releases owned)))))
     (ir-match (emit-match node target env))
     ((or ir-atom ir-prim ir-construct ir-call ir-foreign)
-     (if (and (eq target :return) (self-tail-call-p node))
+     (if (and (eq target :return) (null *releases*) (member node *tail-calls* :test #'eq))
          (emit-tail-call node env)
          (multiple-value-bind (expression statements) (simple-expr node env)
            (append statements
@@ -635,38 +664,114 @@ a copy of the scrutinee if it is a global."
 
 ;;; Definitions
 
+(defun def-params (def)
+  "The parameters of DEF as C types and fresh names."
+  (loop :for (symbol . type) :in (ir-def-params def)
+        :collect (list (c-type type) (fresh-c-name symbol))))
+
+(defun emit-body (def params)
+  "The statements of DEF's body once PARAMS, its C parameters, hold the arguments.
+A value stores its result in the static `value`."
+  (let* ((*emit-def* def)
+         (*result-c-type* (c-type (ir-def-result def)))
+         (*releases* (and (ir-def-pool def) (list (list :stack (ir-def-pool def) "pool_mark"))))
+         (env (loop :for (symbol) :in (ir-def-params def)
+                    :for (nil name) :in params
+                    :collect (cons symbol name))))
+    (append
+     (when *releases*
+       `((:decl (:ptr (:name "char")) "pool_mark" (:dot ,(stack-node (ir-def-pool def)) "top"))))
+     (cond ((eq (ir-def-kind def) :value)
+            (append (emit-node (ir-def-body def) "value" env)
+                    (emit-releases *releases*)
+                    `((:assign ,(var "ready") (:int 1))
+                      (:return ,(var "value")))))
+           (t (emit-node (ir-def-body def) :return env))))))
+
 (defun emit-def (def)
   "The C nodes of the function DEF: a comment, the function and a blank line."
   (let* ((*emit-def* def)
-         (*self* (ir-def-name def))
+         (name (ir-def-name def))
          (*tail-used* nil)
-         (*result-c-type* (c-type (ir-def-result def)))
-         (*releases* (and (ir-def-pool def) (list (list :stack (ir-def-pool def) "pool_mark"))))
-         (params (loop :for (symbol . type) :in (ir-def-params def)
-                       :collect (list (c-type type) (fresh-c-name symbol))))
-         (*params* (loop :for (type name) :in params :collect (cons name type)))
-         (env (loop :for (symbol) :in (ir-def-params def)
-                    :for (nil name) :in params
-                    :collect (cons symbol name)))
-         (value-p (eq (ir-def-kind def) :value))
-         (body (append
-                (when *releases*
-                  `((:decl (:ptr (:name "char")) "pool_mark" (:dot ,(stack-node (ir-def-pool def)) "top"))))
-                (cond (value-p
-                       (append (emit-node (ir-def-body def) "value" env)
-                               (emit-releases *releases*)
-                               `((:assign ,(var "ready") (:int 1))
-                                 (:return ,(var "value")))))
-                      (t (emit-node (ir-def-body def) :return env))))))
-    `((:comment ,(symbol-name (ir-def-name def)))
-      (:fn ,*result-c-type* ,(c-name (ir-def-name def)) ,params
-           (,@(when value-p
-                `((:decl ,*result-c-type* "value" nil :static t)
+         (*tail-calls* (gethash name *def-tail-calls*))
+         (params (def-params def))
+         (*jumps* (list (list name "top" params)))
+         (body (emit-body def params))
+         (result (c-type (ir-def-result def))))
+    `((:comment ,(symbol-name name))
+      (:fn ,result ,(c-name name) ,params
+           (,@(when (eq (ir-def-kind def) :value)
+                `((:decl ,result "value" nil :static t)
                   (:decl (:name "int") "ready" nil :static t)
                   (:if ,(var "ready") ((:return ,(var "value"))))))
             ,@(when *tail-used* '((:label "top")))
             ,@body))
       (:blank))))
+
+(defun member-field (struct-member index)
+  `(:dot (:dot (:dot ,(var "args") "u") ,(format nil "m~d" struct-member)) ,(format nil "p~d" index)))
+
+(defun emit-cycle (defs)
+  "The C nodes of DEFS, functions that tail call each other: one function holding
+all their bodies, which a tail call between them jumps within, and a function
+for each def that enters it."
+  (let* ((result (ir-def-result (first defs)))
+         (struct (fresh-c-name (make-symbol "ARGS")))
+         (function (fresh-c-name (make-symbol "CYCLE")))
+         (members (loop :for def :in defs
+                        :collect (let ((*emit-def* def))
+                                   (list def (def-params def) (fresh-c-name (make-symbol "ENTER"))))))
+         (jumps (loop :for (def params label) :in members
+                      :collect (list (ir-def-name def) label params)))
+         (*emit-def* (first defs)))
+    (unless (every (lambda (def) (eq (ir-def-result def) result)) defs)
+      (emit-error "tail calls between functions with different results"))
+    (let ((*result-c-type* (c-type result)))
+      `((:struct-def ,struct
+                     (:union "u" (:field (:name "char") "none")
+                             ,@(loop :for (nil params) :in members
+                                     :for i :from 0
+                                     :when params
+                                       :collect `(:anon-struct ,(format nil "m~d" i) nil
+                                                               ,@(loop :for (type) :in params
+                                                                       :for j :from 0
+                                                                       :collect `(:field ,type ,(format nil "p~d" j)))))))
+        (:blank)
+        (:comment ,(format nil "~{~a~^, ~}" (mapcar (lambda (def) (symbol-name (ir-def-name def))) defs)))
+        (:fn ,*result-c-type* ,function (((:name "int") "entry") ((:struct ,struct) "args"))
+             (,@(loop :for (nil params) :in members
+                      :append (loop :for (type name) :in params
+                                    :collect `(:decl ,type ,name (:init (:int 0)) :unused t)))
+              ,@(let ((chain '()))
+                  (loop :for (nil params label) :in (reverse members)
+                        :for i :downfrom (1- (length members))
+                        :do (let ((enter `(,@(loop :for (nil name) :in params
+                                                   :for j :from 0
+                                                   :collect `(:assign ,(var name) ,(member-field i j)))
+                                           (:goto ,label))))
+                              (setf chain (if chain
+                                              `((:if (:== ,(var "entry") (:int ,i)) ,enter ,chain))
+                                              enter))))
+                  chain)
+              ,@(loop :for (def params label) :in members
+                      :append (let* ((*tail-used* nil)
+                                     (*tail-calls* (gethash (ir-def-name def) *def-tail-calls*))
+                                     (*jumps* jumps))
+                                `((:label ,label)
+                                  (:block ,@(emit-body def params)))))))
+        (:blank)
+        ,@(loop :for (def nil nil) :in members
+                :for i :from 0
+                :append (let* ((*emit-def* def)
+                               (params (def-params def)))
+                          `((:comment ,(symbol-name (ir-def-name def)))
+                            (:fn ,(c-type (ir-def-result def)) ,(c-name (ir-def-name def)) ,params
+                                 ((:decl (:struct ,struct) "args" (:init (:int 0)))
+                                  ,@(loop :for (nil name) :in params
+                                          :for j :from 0
+                                          :collect `(:assign ,(member-field i j) ,(var name)))
+                                  (:return (:call ,function (:int ,i) ,(var "args")))))
+                            (:blank))))))))
 
 (defun emit-main (lowered)
   "The C node of `main`, which prints the root's result."
@@ -696,6 +801,8 @@ a copy of the scrutinee if it is a global."
         (*c-names* (make-hash-table :test 'eq))
         (*c-counter* 0)
         (*emit-def* nil)
+        (*def-tail-calls* (make-hash-table :test 'eq))
+        (*def-cycle* (make-hash-table :test 'eq))
         (defs (lowered-defs assigned))
         (stacks (max 1 (lowered-stack-count assigned))))
     (maphash (lambda (name def)
@@ -711,8 +818,14 @@ a copy of the scrutinee if it is a global."
                                         `(:proto ,(c-type (ir-def-result def)) ,(c-name name)
                                                  ,@(loop :for (nil . type) :in (ir-def-params def)
                                                          :collect (c-type type))))))
-           (functions (loop :for def :being :the :hash-values :of defs
-                            :append (emit-def def)))
+           (functions (progn
+                        (find-tail-cycles defs)
+                        (loop :for name :being :the :hash-keys :of defs :using (:hash-value def)
+                              :for cycle := (gethash name *def-cycle*)
+                              :append (cond ((null (rest cycle)) (emit-def def))
+                                            ((eq name (first cycle))
+                                             (emit-cycle (mapcar (lambda (member) (gethash member defs))
+                                                                 cycle)))))))
            (main (emit-main assigned))
            (types (type-definitions assigned)))
       `((:comment "Generated by Sheaf.")

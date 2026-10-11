@@ -51,9 +51,7 @@ that expands to it, such as `assert`.
   [#7](https://github.com/takeiteasy/sheaf/issues/7).
 - The SBCL path does not run Sheaf's checks yet:
   [#8](https://github.com/takeiteasy/sheaf/issues/8).
-- Exceptions and mutual tail calls in C:
-  [#4](https://github.com/takeiteasy/sheaf/issues/4),
-  [#5](https://github.com/takeiteasy/sheaf/issues/5).
+- Exceptions in C: [#4](https://github.com/takeiteasy/sheaf/issues/4).
 - `Integer` is 64 bits: [#19](https://github.com/takeiteasy/sheaf/issues/19).
 
 [^loc]: Nodes returned by Coalton's `translate-expression` and every

@@ -104,13 +104,12 @@ A slice past either limit prints `bank space exhausted` or `a bank slice exhaust
 |---|---|
 | A call | A call of the clone's function |
 | A self tail call | A jump to the top of the function |
+| A tail call to a function that tail calls back | A jump within one function that holds the whole cycle[^cycle] |
 | A global value | A function that computes it on first use |
 | A `match` | An `if` chain on the tags, ending in `sheaf_no_match()` |
 
 ## Limitations
 
-- Mutual tail calls grow the C stack:
-  [#5](https://github.com/takeiteasy/sheaf/issues/5).
 - Exceptions, `unwind-protect` and restarts:
   [#4](https://github.com/takeiteasy/sheaf/issues/4).
 - Raw Lisp is an error: [#7](https://github.com/takeiteasy/sheaf/issues/7),
@@ -121,6 +120,13 @@ A slice past either limit prints `bank space exhausted` or `a bank slice exhaust
 - Cells are linked by pointers, not relative references:
   [#13](https://github.com/takeiteasy/sheaf/issues/13).
 
+[^cycle]: A tail call jumps only where nothing is given back afterwards: not
+    from a def with a pool, from inside a `let` that owns stacks or a bank, or
+    through a call that takes a region. Functions whose tail calls form a cycle
+    become one C function holding every member's body, entered at a label per
+    member by an index and a union of the members' arguments. Each member keeps
+    its own function, which fills the union and calls the shared one, so callers
+    outside the cycle are unchanged. Members share a result type.
 [^layout]: The elements follow the header at `offsetof(struct, e)`, so the first
     element is where the push started. `An`, `Gn` and `Sn` are shared by every
     array type with the same element type.

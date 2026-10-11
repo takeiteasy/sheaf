@@ -23,6 +23,7 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `nested-optional.lisp` | A closure nested through an `Optional` to a runtime depth |
 | `stacks.lisp` | Lists built and returned, built and dropped, built in a recursive cycle, and held by a global |
 | `tail.lisp` | A self tail call run ten million times, and a list built by one |
+| `mutual-tail.lisp` | Tail calls between functions, millions deep: a pair, and a cycle of three with different parameters |
 | `arrays.lisp` | Every prelude type and operation, run on SBCL, the interpreter and assigned stacks |
 | `bad-length.lisp` | A length type `define-length` does not declare |
 | `out-of-bounds.lisp` | An index past the end of an array |

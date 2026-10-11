@@ -43,6 +43,13 @@ and exit code."
 (test a-self-tail-call-is-a-loop
   (is (= 10500500 (c-result "tail"))))
 
+(test tail-calls-between-functions-are-loops
+  (is (= 6000001 (c-result "mutual-tail"))))
+
+(test functions-that-tail-call-each-other-are-one-function
+  (let ((program (sheaf:c-program (assigned "mutual-tail"))))
+    (is (= 5 (length (nodes-of program :label))))))
+
 (test an-exhausted-data-stack-aborts
   (multiple-value-bind (output errors code) (run-c (assigned "tail") "-DSHEAF_STACK_SIZE=4096")
     (declare (ignore output))
