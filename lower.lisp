@@ -40,7 +40,7 @@
 (defstruct (ir-local (:include ir-node)) name)
 (defstruct (ir-global (:include ir-node)) name)
 (defstruct (ir-let (:include ir-node)) name value body (stacks '()) (bank nil))
-(defstruct (ir-call (:include ir-node)) function args (destination nil) (growables '()) (bank nil) (region nil) (reset nil))
+(defstruct (ir-call (:include ir-node)) function args (destination nil) (growables '()) (bank nil) (region nil) (spare nil) (reset nil))
 (defstruct (ir-construct (:include ir-node)) constructor args (stack nil))
 (defstruct (ir-prim (:include ir-node)) op args (stack nil) (bank nil))
 (defstruct (ir-foreign (:include ir-node)) vars form)

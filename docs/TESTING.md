@@ -24,6 +24,7 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `stacks.lisp` | Lists built and returned, built and dropped, built in a recursive cycle, and held by a global |
 | `tail.lisp` | A self tail call run ten million times, and a list built by one |
 | `loops.lisp` | Loops that allocate on every iteration: one that carries nothing, a pair, and one that passes a list through, run a million times in a 4 KiB stack |
+| `alternating-loops.lisp` | Loops that pass on what an iteration built: a list, a parameter passed through, a pair of functions and arrays, run a million times in two 4 KiB stacks, and loops that keep what they were given |
 | `banked-loops.lisp` | Loops that build a vector in a bank on every iteration: one that keeps none, a pair, and one that passes the latest on, run a hundred thousand times in eight slices of bank space |
 | `mutual-tail.lisp` | Tail calls between functions, millions deep: a pair, and a cycle of three with different parameters |
 | `arrays.lisp` | Every prelude type and operation, run on SBCL, the interpreter and assigned stacks |

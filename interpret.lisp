@@ -80,7 +80,8 @@ entered, each its kind, index and mark.")
     (walk-ir (lambda (node)
                (when (ir-call-p node)
                  (dolist (reset (ir-call-reset node))
-                   (pushnew reset resets :test #'equal))))
+                   (unless (eq (first reset) :spare)
+                     (pushnew reset resets :test #'equal)))))
              (ir-def-body def))
     resets))
 
@@ -133,9 +134,13 @@ the run touched when the program has a stack assignment."
                (remhash bank banks)
                (release bank))
              (give-back-since (resets)
-               "Free what the stacks and banks in RESETS, from `reset-marks`, gained since."
+               "Free what the stacks and banks in RESETS, from `reset-marks`, gained since.
+A `:spare` stack goes back to what it held when its owner took it."
                (loop :for (kind index mark) :in resets
                      :do (ecase kind
+                           (:spare (let ((stack (stack index)))
+                                     (loop :until (eq (stack-items stack) (stack-mark stack))
+                                           :do (setf (datum-freed (pop (stack-items stack))) t))))
                            (:stack (let ((stack (stack index)))
                                      (loop :until (eq (stack-items stack) mark)
                                            :do (setf (datum-freed (pop (stack-items stack))) t))))
@@ -337,12 +342,17 @@ stacks and banks it saves, each with what it held on entry."
                                     :for arg :in (ir-call-args node)
                                     :collect (cons name (evaluate arg env))))
                          (region (ir-call-region node))
+                         (spare (ir-call-spare node))
                          (reset (ir-call-reset node)))
                     (when (and stacks reset)
-                      (give-back-since (remove-if-not (lambda (mark) (member (butlast mark) reset :test #'equal))
-                                                      *iteration-marks*)))
+                      (give-back-since (loop :for entry :in reset
+                                             :collect (if (eq (first entry) :spare)
+                                                          (list :spare (second entry) nil)
+                                                          (find entry *iteration-marks* :key #'butlast :test #'equal)))))
                     (when region (claim region))
+                    (when spare (claim spare))
                     (unwind-protect (enter def env)
+                      (when spare (release spare))
                       (when region (release region)))))
                  (ir-construct
                   (let* ((args (mapcar (lambda (arg) (evaluate arg env)) (ir-construct-args node)))

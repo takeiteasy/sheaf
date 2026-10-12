@@ -56,7 +56,8 @@ holds gets a stack of its own[^count]:
 
 A def is cloned for each context it is called in: the destination of its
 result, the stacks of its growable values, the stacks in use on entry, and for
-a recursive cycle the region it allocates in. Every index is then a constant,
+a recursive cycle the region it allocates in, and the spare region of a loop
+that alternates. Every index is then a constant,
 and a clone's name shows its context.
 
 ```text
@@ -86,6 +87,23 @@ does when its arguments point only into parameters and globals[^bare]:
 ```
 
 A call that carries what it built keeps the region, as `build` does.
+
+A loop that drops what it was given and passes on what its iteration built
+builds in two regions in turn[^alternate]:
+
+```lisp
+(define (rebuild n xs)                           ; builds in one region, frees the other
+  (if (== n 0) (total xs) (rebuild (- n 1) (Cons n Nil))))
+(define (thread n env xs)                        ; env is passed on unchanged
+  (if (== n 0) (total xs) (thread (- n 1) env (Cons n (Cons (total env) Nil)))))
+```
+
+A loop does when each of its tail calls passes on only storage the iteration
+built, globals and parameters every call back into the loop passes on unchanged,
+and every call back into it is a tail call. A loop that keeps a changing
+parameter along with what it built keeps both regions, as `accumulate` does:
+[#33](https://github.com/takeiteasy/sheaf/issues/33). So does one with a `catch`
+or `protect`: [#32](https://github.com/takeiteasy/sheaf/issues/32).
 
 A loop that builds growable values in a bank gives their slices back the same
 way, when its arguments reach none of them[^slices]:
@@ -129,7 +147,8 @@ VECTORS-DOWN<UFIX → LIST (VECTOR UFIX)>{12}[dest 1 bank 2 busy 0 1 2]
 | `ir-call-growables` | The stacks the growable values of a result are built on |
 | `ir-call-bank` | The bank a result's growable values are built from |
 | `ir-call-region` | A region the call takes and frees |
-| `ir-call-reset` | The stacks and banks a tail call frees back to where its iteration began, each `(:stack index)` or `(:bank index)` |
+| `ir-call-spare` | The second region a call into a loop that alternates takes and frees |
+| `ir-call-reset` | What a tail call frees before it jumps, each `(:stack index)` back to where its iteration began, `(:bank index)` likewise, or `(:spare index)`, the region the next iteration builds in, back to where it was when the loop was entered |
 | `ir-let-stacks` | The stacks the growable values a `let` binds own |
 | `ir-let-bank` | The bank a `let` owns for a result it drops |
 | `ir-prim-bank` | The bank a growable value takes its stack from |
@@ -157,8 +176,12 @@ freed.
 - A cycle keeps what it allocates until the call into it returns, unless a
   tail call frees it each iteration:
   [#29](https://github.com/takeiteasy/sheaf/issues/29).
-- A loop that passes storage built in an iteration to the next keeps all of it:
+- A loop whose result holds storage keeps all it builds:
   [#30](https://github.com/takeiteasy/sheaf/issues/30).
+- A loop that passes on both what it built and a changing parameter keeps all
+  it builds: [#33](https://github.com/takeiteasy/sheaf/issues/33).
+- A loop with a `catch` or `protect` keeps all it builds:
+  [#32](https://github.com/takeiteasy/sheaf/issues/32).
 - A growable local live across a call back into its own cycle is an error:
   [#17](https://github.com/takeiteasy/sheaf/issues/17).
 
@@ -188,6 +211,16 @@ freed.
     only parameters, globals and values that hold no growable value. The
     iteration saves the bank's head when it starts and the jump gives back the
     slices taken since, as the owner of a bank does when it ends.
+[^alternate]: `root-summary-call-roots` gives the roots each call's arguments
+    reach, and `find-swaps` finds the calls that switch regions and the
+    parameters that stay the same. The call into the loop takes two regions
+    and clones the loop for each order of them, `REBUILD<…>[region 2 spare 1 …]`
+    and `[region 1 spare 2 …]`. A call that switches regions frees the spare,
+    which holds only what the previous iteration built, and jumps to the clone
+    that builds in it. The interpreter frees the cells above what the spare held
+    when it was taken, and C saves its top when the cycle is entered
+    ([EMITTER.md](EMITTER.md#calls)). A loop whose result holds no storage
+    alternates; the result of one that does is built in the caller's destination.
 [^region]: A cycle of functions whose results hold no storage and that build
     no cells or arrays takes no region. Growable values go on stacks of their
     own, so a cycle that builds only those takes none either.

@@ -415,3 +415,47 @@ or the functions in CYCLE."
 
 (test resetting-banked-loops-keep-their-results
   (is (= 37 (sheaf:run-lowered (assigned "banked-loops")))))
+
+;;; Loops that alternate between two regions
+
+(defun spares-freed (fixture name &rest cycle)
+  "The spare region each clone of NAME and CYCLE in FIXTURE frees, one for each switching call."
+  (loop :for def :in (mapcan (lambda (member) (copy-list (clones fixture member))) (cons name cycle))
+        :append (loop :for call :in (calls def)
+                      :append (loop :for (kind index) :in (sheaf:ir-call-reset call)
+                                    :when (eq kind :spare) :collect index))))
+
+(defun entry-regions (fixture name)
+  "The region and spare region RUN's call of NAME in FIXTURE takes."
+  (let ((entry (call-to (first (clones fixture "RUN")) fixture name)))
+    (list (sheaf:ir-call-region entry) (sheaf:ir-call-spare entry))))
+
+(defun alternates-p (fixture name &rest cycle)
+  "Whether the call of NAME in RUN builds in two regions in turn, each freed by a switching call."
+  (destructuring-bind (region spare) (entry-regions fixture name)
+    (and (integerp region) (integerp spare) (/= region spare)
+         (equal (sort (copy-list (apply #'spares-freed fixture name cycle)) #'<)
+                (sort (list region spare) #'<)))))
+
+(test a-loop-that-passes-on-what-it-built-builds-in-two-regions-in-turn
+  (is-true (alternates-p "alternating-loops" "REBUILD")))
+
+(test a-loop-that-threads-a-parameter-through-alternates
+  (is-true (alternates-p "alternating-loops" "THREAD")))
+
+(test loops-through-two-functions-alternate
+  (is-true (alternates-p "alternating-loops" "PING" "PONG")))
+
+(test a-loop-that-builds-arrays-alternates
+  (is-true (alternates-p "alternating-loops" "SPIN")))
+
+(test a-loop-that-keeps-what-it-was-given-has-one-region
+  (is (null (second (entry-regions "alternating-loops" "ACCUMULATE"))))
+  (is (null (spares-freed "alternating-loops" "ACCUMULATE"))))
+
+(test a-cycle-that-calls-itself-without-a-tail-call-has-one-region
+  (is (null (second (entry-regions "alternating-loops" "SUM-DOWN"))))
+  (is (null (spares-freed "alternating-loops" "SUM-DOWN"))))
+
+(test alternating-loops-keep-their-results
+  (is (= 247 (sheaf:run-lowered (assigned "alternating-loops")))))

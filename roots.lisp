@@ -8,7 +8,7 @@
 (defvar *reference-types*)
 (defvar *here* nil "The location of the node being checked, for errors.")
 
-(defstruct (root-summary (:constructor make-root-summary (&key result stores locals reached bare-calls slice-free-calls)))
+(defstruct (root-summary (:constructor make-root-summary (&key result stores locals reached bare-calls slice-free-calls call-roots)))
   "What a def does with the roots of its arguments. RESULT lists what its result
 may point into: a parameter index, `:global`, or `:fresh` for storage it builds
 in its caller's destinations. STORES lists the stores it leaves its caller to
@@ -17,8 +17,10 @@ into, and the chain of places that justifies it. LOCALS maps each name to its
 roots. REACHED lists the locals whose storage the result holds, which are built
 in the caller's destinations. BARE-CALLS lists the calls whose arguments point
 only into parameters and globals, and SLICE-FREE-CALLS those whose arguments
-reach no growable value the def built."
-  (result '()) (stores '()) (locals nil) (reached '()) (bare-calls '()) (slice-free-calls '()))
+reach no growable value the def built. CALL-ROOTS lists each call with the roots
+of its arguments and everything those reach."
+  (result '()) (stores '()) (locals nil) (reached '()) (bare-calls '()) (slice-free-calls '())
+  (call-roots '()))
 
 ;; op, how it treats roots, and the arguments it uses
 (defparameter *prim-roots*
@@ -337,18 +339,22 @@ REPORT is true, notes that they must not outlive what BODY frees."
                    (dolist (held (remove root (closure (list root) (list contents))))
                      (cond ((integerp held) (pushnew held result))
                            ((eq held :global) (pushnew :global result)))))))
-        (make-root-summary :result (nreverse result)
-                           :stores (reverse stores)
-                           :locals locals
-                           :reached reached
-                           :bare-calls bare-calls
-                           :slice-free-calls
-                           (loop :for (call . arg-roots) :in call-roots
-                                 :when (every (lambda (root)
-                                                (or (integerp root) (eq root :global)
-                                                    (not (gethash root growable-lets t))))
-                                              (closure (apply #'append arg-roots) (list contents links)))
-                                   :collect call))))))
+        (let ((call-reach (loop :for (call . arg-roots) :in call-roots
+                                :collect (list call arg-roots
+                                               (closure (apply #'append arg-roots) (list contents links))))))
+          (make-root-summary :result (nreverse result)
+                             :stores (reverse stores)
+                             :locals locals
+                             :reached reached
+                             :bare-calls bare-calls
+                             :call-roots call-reach
+                             :slice-free-calls
+                             (loop :for (call nil reach) :in call-reach
+                                   :when (every (lambda (root)
+                                                  (or (integerp root) (eq root :global)
+                                                      (not (gethash root growable-lets t))))
+                                                reach)
+                                     :collect call)))))))
 
 (defun root-summaries (lowered &key report)
   "A table from the name of each def in LOWERED to its `root-summary`. When

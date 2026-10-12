@@ -105,6 +105,7 @@ A slice past either limit prints `bank space exhausted` or `a bank slice exhaust
 | A call | A call of the clone's function |
 | A self tail call | A jump to the top of the function |
 | A tail call that frees its iteration's region ([STACKS.md](STACKS.md#loops)) | The stack's `top` restored to its value at the start of the iteration, then the jump |
+| A tail call that switches regions ([STACKS.md](STACKS.md#loops)) | The spare region's `top` restored to its value when the cycle was entered, then a jump to the clone that builds in it |
 | A tail call that frees its iteration's slices | `sheaf_bank_release` to the bank's `head` at the start of the iteration, then the jump |
 | A tail call to a function that tail calls back | A jump within one function that holds the whole cycle[^cycle] |
 | A global value | A function that computes it on first use |

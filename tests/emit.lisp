@@ -174,3 +174,14 @@ and exit code."
                 (apply #'run-c (sheaf:assign-stacks (lowered-from "banked-loops" root)) *small-banks*)
               (is (zerop code) "~a: ~a" root errors)
               (is (= expected (parse-integer output)) "~a" root))))
+
+(defun big-alternating-loops ()
+  (sheaf:assign-stacks (lowered-from "alternating-loops" "BIG")))
+
+(test a-loop-that-alternates-runs-in-two-small-stacks
+  (is (= 247 (c-result "alternating-loops")))
+  (is (= 500011500016
+         (parse-integer (run-c (big-alternating-loops) "-DSHEAF_STACK_SIZE=4096")))))
+
+(test a-loop-that-alternates-gives-its-spare-region-back-before-it-jumps
+  (is (search "frame_mark_" (with-output-to-string (out) (sheaf:emit-c (big-alternating-loops) out)))))

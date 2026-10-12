@@ -75,8 +75,11 @@ linked by relative references.
   [#13](https://github.com/takeiteasy/sheaf/issues/13).
 - A cycle's region grows until the call into it returns, unless a tail call
   frees it each iteration: [#29](https://github.com/takeiteasy/sheaf/issues/29).
-- A loop that passes storage built in an iteration to the next keeps all of it:
-  [#30](https://github.com/takeiteasy/sheaf/issues/30).
+- A loop whose result holds storage, that passes on both what it built and a
+  changing parameter, or that has a `catch` or `protect`, keeps all it builds:
+  [#30](https://github.com/takeiteasy/sheaf/issues/30),
+  [#33](https://github.com/takeiteasy/sheaf/issues/33),
+  [#32](https://github.com/takeiteasy/sheaf/issues/32).
 - A growable value kept across a call back into its recursive cycle is
   rejected: [#17](https://github.com/takeiteasy/sheaf/issues/17).
 

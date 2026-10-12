@@ -501,14 +501,18 @@ returns the expression."
   "A C expression for the call NODE, and the statements it needs first."
   (let ((call `(:call ,(c-name (ir-call-function node))
                       ,@(mapcar (lambda (arg) (atom-expr arg env)) (ir-call-args node))))
-        (region (ir-call-region node)))
-    (if region
-        (let ((mark (fresh-c-name (make-symbol "MARK")))
+        (owned (remove nil (list (ir-call-region node) (ir-call-spare node)))))
+    (if owned
+        (let ((marks (loop :for nil :in owned :collect (fresh-c-name (make-symbol "MARK"))))
               (result (fresh-c-name (make-symbol "RESULT"))))
           (values (var result)
-                  (list `(:decl (:ptr (:name "char")) ,mark (:dot ,(stack-node region) "top"))
-                        `(:decl ,(c-type (ir-node-type node)) ,result ,call)
-                        `(:assign (:dot ,(stack-node region) "top") ,(var mark)))))
+                  (append (loop :for index :in owned
+                                :for mark :in marks
+                                :collect (mark-declaration :stack index mark))
+                          (list `(:decl ,(c-type (ir-node-type node)) ,result ,call))
+                          (emit-releases (loop :for index :in owned
+                                               :for mark :in marks
+                                               :collect (list :stack index mark))))))
         (values call '()))))
 
 (defun simple-expr (node env)
@@ -585,7 +589,9 @@ names of the defs that tail call each other."
                   :for temp :in temps
                   :collect `(:assign ,(var name) ,(var temp)))
           ,@(emit-releases (loop :for (kind index) :in (ir-call-reset node)
-                                 :collect (list kind index (iteration-mark kind index))))
+                                 :collect (if (eq kind :spare)
+                                              (list :stack index (frame-mark index))
+                                              (list kind index (iteration-mark kind index)))))
           (:goto ,label))))))
 
 (defun pattern-code (pattern access)
@@ -818,9 +824,15 @@ in the frame, which then goes on unwinding."
   "The name of the C variable that saves a stack or bank at each iteration's start."
   (format nil "iter_mark_~(~a~)_~d" kind index))
 
+(defun frame-mark (index)
+  "The name of the C variable that saves a spare region when a cycle is entered."
+  (format nil "frame_mark_~d" index))
+
 (defun tail-resets ()
-  "The stacks and banks the tail calls being emitted reset, each its kind and index."
-  (remove-duplicates (loop :for call :in *tail-calls* :append (ir-call-reset call))
+  "The stacks and banks the tail calls being emitted reset to where the iteration
+began, each its kind and index."
+  (remove-duplicates (loop :for call :in *tail-calls*
+                           :append (remove :spare (ir-call-reset call) :key #'first))
                      :test #'equal))
 
 (defun emit-body (def params)
@@ -867,6 +879,15 @@ A value stores its result in the static `value`."
 (defun member-field (struct-member index)
   `(:dot (:dot (:dot ,(var "args") "u") ,(format nil "m~d" struct-member)) ,(format nil "p~d" index)))
 
+(defun spare-regions (defs)
+  "The spare regions the tail calls of the cycle DEFS switch to, which the cycle
+gives back to what they held when it was entered."
+  (remove-duplicates
+   (loop :for def :in defs
+         :append (loop :for call :in (gethash (ir-def-name def) *def-tail-calls*)
+                       :append (loop :for (kind index) :in (ir-call-reset call)
+                                     :when (eq kind :spare) :collect index)))))
+
 (defun emit-cycle (defs)
   "The C nodes of DEFS, functions that tail call each other: one function holding
 all their bodies, which a tail call between them jumps within, and a function
@@ -898,6 +919,8 @@ for each def that enters it."
              (,@(loop :for (nil params) :in members
                       :append (loop :for (type name) :in params
                                     :collect `(:decl ,type ,name (:init (:int 0)) :unused t)))
+              ,@(loop :for index :in (spare-regions defs)
+                      :collect (mark-declaration :stack index (frame-mark index)))
               ,@(let ((chain '()))
                   (loop :for (nil params label) :in (reverse members)
                         :for i :downfrom (1- (length members))

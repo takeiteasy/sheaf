@@ -15,6 +15,8 @@
 (defvar *summaries*)
 (defvar *placements*)
 (defvar *banked*)
+(defvar *alternating*)
+(defvar *swaps*)
 
 ;;; Storage
 
@@ -303,6 +305,79 @@ which `emit-node` can turn into jumps."
         (walk (ir-def-body def) (ir-def-pool def))))
     calls))
 
+;;; Alternating loops
+
+(defun alternates-p (members defs)
+  "Whether the cycle MEMBERS can build in two regions in turn: every call back
+into it is a tail call, and none of its defs has a handler."
+  (every (lambda (name)
+           (let* ((def (gethash name defs))
+                  (tail (tail-calls def))
+                  (ok t))
+             (walk-ir (lambda (node)
+                        (typecase node
+                          ((or ir-catch ir-protect) (setf ok nil))
+                          (ir-call (when (and (member (ir-call-function node) members)
+                                              (not (member node tail :test #'eq)))
+                                     (setf ok nil)))))
+                      (ir-def-body def))
+             ok))
+         members))
+
+(defun invariant-parameters (members defs)
+  "The parameters of the cycle MEMBERS that each call back into it passes on from
+a parameter its caller has in the same place, or from globals, each a name and an
+index. Such a parameter always holds what the call into the cycle gave it."
+  (let ((invariant (loop :for name :in members
+                         :append (loop :for index :below (length (ir-def-params (gethash name defs)))
+                                       :collect (cons name index)))))
+    (loop :for changed := nil
+          :do (dolist (name members)
+                (loop :for (call arg-roots) :in (root-summary-call-roots (gethash name *summaries*))
+                      :when (member (ir-call-function call) members)
+                        :do (loop :for roots :in arg-roots
+                                  :for index :from 0
+                                  :unless (every (lambda (root)
+                                                   (or (eq root :global)
+                                                       (and (integerp root)
+                                                            (member (cons name root) invariant :test #'equal))))
+                                                 roots)
+                                    :do (let ((entry (cons (ir-call-function call) index)))
+                                          (when (member entry invariant :test #'equal)
+                                            (setf invariant (remove entry invariant :test #'equal)
+                                                  changed t))))))
+          :while changed)
+    invariant))
+
+(defun swap-calls (members invariant)
+  "The calls back into the cycle MEMBERS whose arguments reach only globals, the
+parameters in INVARIANT and storage the iteration built, and that are not bare."
+  (loop :for name :in members
+        :for summary := (gethash name *summaries*)
+        :append (loop :for (call nil reach) :in (root-summary-call-roots summary)
+                      :when (and (member (ir-call-function call) members)
+                                 (not (member call (root-summary-bare-calls summary) :test #'eq))
+                                 (every (lambda (root)
+                                          (or (eq root :global)
+                                              (and (integerp root) (member (cons name root) invariant :test #'equal))
+                                              (and (symbolp root) (not (keywordp root)))))
+                                        reach))
+                        :collect call)))
+
+(defun find-swaps (defs)
+  "Fill `*alternating*` with the names of the defs in cycles that can alternate
+between two regions, and `*swaps*` with the calls that switch regions."
+  (maphash (lambda (name cycle)
+             (destructuring-bind (members . builds-storage) cycle
+               (when (and (eq name (first members)) builds-storage (alternates-p members defs))
+                 (let ((swaps (swap-calls members (invariant-parameters members defs))))
+                   (when swaps
+                     (dolist (member members)
+                       (setf (gethash member *alternating*) t))
+                     (dolist (call swaps)
+                       (setf (gethash call *swaps*) t)))))))
+           *cycles*))
+
 ;;; Handlers
 
 (defstruct (effects (:constructor make-effects ()))
@@ -347,7 +422,8 @@ effects from TABLE."
                    (ir-prim (stacks (list (ir-prim-stack node)))
                     (bank (ir-prim-bank node))
                     (when (stores-storage-p node) (setf (effects-stores effects) t)))
-                   (ir-call (stacks (list* (ir-call-destination node) (ir-call-region node) (ir-call-growables node)))
+                   (ir-call (stacks (list* (ir-call-destination node) (ir-call-region node) (ir-call-spare node)
+                                            (ir-call-growables node)))
                     (bank (ir-call-bank node))
                     (def (ir-call-function node)))
                    (ir-let (stacks (ir-let-stacks node))
@@ -436,22 +512,23 @@ back, unless it stores storage that could outlive it."
     (dotimes (i count (nreverse stacks))
       (push (take-index (reduce #'with-index stacks :initial-value busy)) stacks))))
 
-(defun clone-def (name destination growables bank region busy)
+(defun clone-def (name destination growables bank region spare busy)
   "The name of the clone of the def NAME for a context: the stack its result is
 built on, the stacks its growable values are built on or the bank that hands
-them out, the region its cycle allocates in, and the stacks in use on entry."
-  (let ((key (list name destination growables bank region busy)))
+them out, the region its cycle allocates in, the region a loop that alternates
+builds in next, and the stacks in use on entry."
+  (let ((key (list name destination growables bank region spare busy)))
     (or (gethash key *clones*)
-        (let ((clone (make-symbol (format nil "~a[~@[dest ~d ~]~@[grow~{ ~d~} ~]~@[bank ~d ~]~@[region ~d ~]busy~{ ~d~}]"
-                                          (symbol-name name) destination growables bank region busy))))
+        (let ((clone (make-symbol (format nil "~a[~@[dest ~d ~]~@[grow~{ ~d~} ~]~@[bank ~d ~]~@[region ~d ~]~@[spare ~d ~]busy~{ ~d~}]"
+                                          (symbol-name name) destination growables bank region spare busy))))
           (setf (gethash key *clones*) clone)
           (setf (gethash clone *defs*)
-                (assign-def (gethash name (lowered-defs *lowered*)) clone destination growables bank region busy))
+                (assign-def (gethash name (lowered-defs *lowered*)) clone destination growables bank region spare busy))
           clone))))
 
 (defun global-clone (name)
   (destructuring-bind (&optional destination bank &rest growables) (gethash name *globals*)
-    (clone-def name destination growables bank nil *global-busy*)))
+    (clone-def name destination growables bank nil nil *global-busy*)))
 
 (defun keep-resets (def)
   "Clear the reset of each call in DEF that is not a tail call: only a call that
@@ -459,20 +536,26 @@ nothing follows may give back what its iteration built."
   (let ((tail (tail-calls def)))
     (walk-ir (lambda (node)
                (when (and (ir-call-p node) (ir-call-reset node) (not (member node tail :test #'eq)))
+                 (when (assoc :spare (ir-call-reset node))
+                   (error "~s: a call that switches regions is not a tail call" (ir-def-name def)))
                  (setf (ir-call-reset node) nil)))
              (ir-def-body def))))
 
-(defun iteration-resets (def node region bank)
-  "What the tail call NODE in DEF gives back to where its iteration began, each
-`(:stack index)` or `(:bank index)`: the region when its arguments point only into
-parameters and globals, and the bank when they reach no slice built in it."
+(defun iteration-resets (def node region spare bank)
+  "What the tail call NODE in DEF gives back, each `(:stack index)`, `(:spare index)`
+or `(:bank index)`: the region to where its iteration began when its arguments
+point only into parameters and globals, the other region of a loop that alternates
+when they reach only what the iteration built, and the bank when they reach no
+slice built in it."
   (let ((summary (gethash (ir-def-name def) *summaries*)))
     (append (and region (member node (root-summary-bare-calls summary) :test #'eq)
                  (list (list :stack region)))
+            (and spare (gethash node *swaps*)
+                 (list (list :spare spare)))
             (and bank (member node (root-summary-slice-free-calls summary) :test #'eq)
                  (list (list :bank bank))))))
 
-(defun assign-def (def clone destination growables bank region entry-busy)
+(defun assign-def (def clone destination growables bank region spare entry-busy)
   (let* ((cycle (gethash (ir-def-name def) *cycles*))
          (reached (reached-table def))
          (pool (if cycle
@@ -517,14 +600,22 @@ parameters and globals, and the bank when they reach no slice built in it."
                               (when (set-difference busy entry-busy)
                                 (error "~s keeps a growable local across a call back into its recursive cycle: https://github.com/takeiteasy/sheaf/issues/17"
                                        (ir-def-name def)))
-                              (setf (ir-call-reset copy) (iteration-resets def node region bank))
-                              (clone-def callee dest stacks call-bank region entry-busy))
+                              (setf (ir-call-reset copy) (iteration-resets def node region spare bank))
+                              (if (and spare (gethash node *swaps*))
+                                  (if dest
+                                      (error "~s switches regions in a cycle whose result holds storage" (ir-def-name def))
+                                      (clone-def callee dest stacks call-bank spare region entry-busy))
+                                  (clone-def callee dest stacks call-bank region spare entry-busy)))
                              (callee-cycle
                               (let* ((own-region (and (null dest) (cdr callee-cycle) (take-index busy)))
+                                     (own-spare (and own-region (gethash callee *alternating*)
+                                                     (take-index (with-index busy own-region))))
                                      (callee-region (or dest own-region)))
-                                (setf (ir-call-region copy) own-region)
-                                (clone-def callee dest stacks call-bank callee-region (with-index busy callee-region))))
-                             (t (clone-def callee dest stacks call-bank nil busy))))
+                                (setf (ir-call-region copy) own-region
+                                      (ir-call-spare copy) own-spare)
+                                (clone-def callee dest stacks call-bank callee-region own-spare
+                                           (with-index (with-index busy callee-region) own-spare))))
+                             (t (clone-def callee dest stacks call-bank nil nil busy))))
                  copy))
              (reset-candidates (node reaches owned supply owned-bank)
                "The stacks and banks the handler NODE may give back when control
@@ -675,6 +766,8 @@ stack below its stack count. Returns T."
                                                              (ir-call-growables node))))
                                (when (ir-call-region node)
                                  (check-index (ir-call-region node) "a call's region"))
+                               (when (ir-call-spare node)
+                                 (check-index (ir-call-spare node) "a call's spare region"))
                                (loop :for (nil index) :in (ir-call-reset node)
                                      :do (check-index index "a call's reset")))
                       (ir-prim (cond ((ir-prim-bank node)
@@ -719,10 +812,13 @@ called in, so every stack index is a constant. Returns the new program, whose
          (*summaries* (root-summaries lowered))
          (*placements* (compute-placements defs))
          (*cycles* (find-cycles defs))
+         (*alternating* (make-hash-table :test 'eq))
+         (*swaps* (make-hash-table :test 'eq))
          (*globals* (make-hash-table :test 'eq))
          (*global-busy* '())
          (*stack-count* 0)
          (root (gethash (lowered-root lowered) defs)))
+    (find-swaps defs)
     (flet ((take-global (name)
              (let ((placement (gethash name *placements*)))
                (flet ((take ()

@@ -63,7 +63,7 @@
    #:ir-local #:ir-local-name
    #:ir-global #:ir-global-name
    #:ir-let #:ir-let-name #:ir-let-value #:ir-let-body #:ir-let-stacks #:ir-let-bank
-   #:ir-call #:ir-call-function #:ir-call-args #:ir-call-destination #:ir-call-growables #:ir-call-bank #:ir-call-region #:ir-call-reset
+   #:ir-call #:ir-call-function #:ir-call-args #:ir-call-destination #:ir-call-growables #:ir-call-bank #:ir-call-region #:ir-call-spare #:ir-call-reset
    #:ir-construct #:ir-construct-constructor #:ir-construct-args #:ir-construct-stack
    #:ir-prim #:ir-prim-op #:ir-prim-args #:ir-prim-stack #:ir-prim-bank
    #:ir-foreign #:ir-foreign-vars #:ir-foreign-form
