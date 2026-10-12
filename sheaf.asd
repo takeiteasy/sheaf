@@ -12,7 +12,8 @@
                (:file "arr")
                (:file "grow")
                (:file "stack")
-               (:file "ref")))
+               (:file "ref")
+               (:file "vector")))
 
 (asdf:defsystem #:sheaf
   :description "A statically typed Lisp with no heap, built on a Coalton frontend"

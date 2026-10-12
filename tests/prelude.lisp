@@ -118,6 +118,12 @@
     (is (= expected (sheaf:run-lowered (lowered "vector-library"))))
     (is (= expected (sheaf:run-lowered (assigned "vector-library"))))))
 
+(test vector-folds-sorts-and-searches-run-on-every-tier
+  (let ((expected (run-on-sbcl "vector-folds")))
+    (is (zerop (count-ir (lowered "vector-folds") 'sheaf:ir-foreign)))
+    (is (= expected (sheaf:run-lowered (lowered "vector-folds"))))
+    (is (= expected (sheaf:run-lowered (assigned "vector-folds"))))))
+
 (test list-functions-run-on-every-tier
   (dolist (fixture '("lists" "poly"))
     (let ((expected (run-on-sbcl fixture)))

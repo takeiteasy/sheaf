@@ -53,6 +53,7 @@ instances are not consulted: keys compare as numbers.
 | `coalton/vector` | `(index i v)`, `(index-unsafe i v)`, `(set! i x v)`, `(length v)` | An `Optional` element, an element, a write, and the length |
 | `coalton/vector` | `(copy v)`, `(subseq v start end)`, `(resect! v start end)`, `(reverse! v)`, `(pop-unsafe! v)` | A new `Vector`, a new `Vector` of a range, a removal of a range, an in-place reversal, and a removal of the last element that is an error when empty; `start` and `end` may be in either order and past the end |
 | `coalton/vector` | `(with-capacity n)`, `(capacity v)`, `(set-capacity! n v)` | A `Vector`, its length, and a truncation to `n` when `n` is below the length[^capacity] |
+| `coalton/vector` | `fold`, `foldr`, `find-elem`, `sort-by!`, `sort!` | A fold from either end, the index of an element, and an in-place stable sort[^replaced] |
 | `coalton/list` | `%reverse!` | A list reversed in place, which `map`, `take` and `split` use on a list they built[^reverse] |
 | `coalton/hashtable` | `(new)`, `(with-capacity n)`, `(make (k v) ...)` | A `HashTable`; the capacity is a hint |
 | `coalton/hashtable` | `(get h k)`, `(set! h k x)`, `(remove! h k)`, `(count h)` | An `Optional` value, a write, a removal, and the number of entries |
@@ -60,6 +61,20 @@ instances are not consulted: keys compare as numbers.
 
 Mutating operations return `Unit`. An index outside an array is an error.
 Arrays are shared, not copied, when bound to another name.
+
+## Replacements
+
+A standard library function whose body is raw Lisp can be replaced by a
+function of `sheaf/prelude` written in Coalton. Monomorphization takes the
+replacement's code where it would take the original's, so the program runs the
+replacement on every tier except Coalton's own backend for the standard library,
+which keeps the original.
+
+| Replaced | By |
+|---|---|
+| `Foldable Vector` `fold` and `foldr` | `vector-fold`, `vector-foldr` |
+| `coalton/vector:find-elem` | `vector-find-elem` |
+| `coalton/vector:sort-by!` | `vector-sort-by!`, an insertion sort[^sort] |
 
 ## Where an array is built
 
@@ -75,7 +90,7 @@ stack when it grows.
 - A `HashTable` key other than `UFix` is a lowering error:
   [#20](https://github.com/takeiteasy/sheaf/issues/20).
 - `Vector` and `HashTable` functions other than the ones above that hold
-  raw Lisp or a `for` loop, such as `entries`, `keys`, `fold` and `extend!`, are
+  raw Lisp or a `for` loop, such as `entries`, `keys` and `extend!`, are
   errors: [#36](https://github.com/takeiteasy/sheaf/issues/36).
 
 [^capacity]: Capacity is a hint. A `Vector` has no capacity of its own, so `capacity`
@@ -85,6 +100,14 @@ stack when it grows.
 [^reverse]: The cells of the list are relinked, so it is only safe on a list
     whose cells outlive none of the cells they point to after the relink: the
     standard library uses it on lists it has just built.
+
+[^replaced]: The replacements are in `prelude/vector.lisp`. Each has the type and
+    constraints of the function it stands for, so the program's call needs no
+    change. The code's loops and returns lower like any other.
+
+[^sort]: Stable, where Coalton's backend sorts with `cl:sort`, which is not, so
+    elements that compare equal may end in a different order on Coalton's backend.
+    A sort of a long vector is slow: [#45](https://github.com/takeiteasy/sheaf/issues/45).
 
 [^len]: A `FixedArray` length is read from the type after monomorphization,
     through a table `define-length` fills. The `Extent` class that

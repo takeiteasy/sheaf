@@ -466,10 +466,12 @@ its sets are then free to differ per use."
     (t (unsupported "~(~a~) nodes" (type-of node)))))
 
 (defun infer-for (node env)
-  "The shape of the loop NODE. Each variable's shape is kept under its binding."
+  "The shape of the loop NODE. Each variable's shape is kept under its binding.
+A variable has the type of its initial value: a binding's own type is not
+substituted when Coalton specializes generic code."
   (let ((inner env))
     (dolist (binding (ast:node-for-bindings node))
-      (let ((shape (shape-of (ast:node-for-binding-type binding))))
+      (let ((shape (shape-of (ast:node-type (ast:node-for-binding-init binding)))))
         (setf (gethash binding *shapes*) shape)
         (unify-shapes shape (infer (ast:node-for-binding-init binding)
                                    (if (ast:node-for-sequential-p node) inner env)))

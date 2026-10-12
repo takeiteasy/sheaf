@@ -27,6 +27,11 @@
   (:local-nicknames (#:prelude #:sheaf/prelude))
   (:export #:new #:push! #:pop!))
 
+(defpackage #:sheaf/prelude/vector
+  (:use #:coalton #:coalton-prelude)
+  (:local-nicknames (#:vector #:coalton/vector))
+  (:export #:vector-fold #:vector-foldr #:vector-find-elem #:vector-sort-by!))
+
 (defpackage #:sheaf/prelude/ref
   (:use #:coalton #:coalton-prelude)
   (:local-nicknames (#:prelude #:sheaf/prelude))

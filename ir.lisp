@@ -21,14 +21,55 @@ binding it defines."
                   (error "Failed to compile ~a" pathname)))))
     program))
 
+(defparameter *prelude-replacements*
+  '((coalton/vector:find-elem . sheaf/prelude/vector:vector-find-elem)
+    (coalton/vector:sort-by! . sheaf/prelude/vector:vector-sort-by!))
+  "The standard library functions whose raw Lisp the prelude replaces with Coalton,
+each with the function that stands in for it.")
+
+(defparameter *prelude-method-replacements*
+  '((coalton/classes:foldable coalton/vector:vector
+     (coalton/classes:fold . sheaf/prelude/vector:vector-fold)
+     (coalton/classes:foldr . sheaf/prelude/vector:vector-foldr)))
+  "The instance methods the prelude replaces: a class, the type whose instance it
+is, and each method with the function that stands in for it.")
+
+(defvar *replacement-table* nil)
+
+(defun replacements ()
+  "A table from the origin of each standard library function or instance method
+the prelude replaces to the function whose code stands in for it."
+  (or *replacement-table*
+      (setf *replacement-table*
+            (let ((table (make-hash-table :test 'eq))
+                  (env entry:*global-environment*))
+              (loop :for (function . replacement) :in *prelude-replacements*
+                    :do (setf (gethash function table) replacement))
+              (loop :for (class-name type . methods) :in *prelude-method-replacements*
+                    :do (let* ((class (tc:lookup-class env class-name))
+                               (names (mapcar #'tc:ty-class-method-name (tc:ty-class-unqualified-methods class))))
+                          (dolist (instance (tc:lookup-class-instances env class-name :no-error t))
+                            (let ((head (first (tc:flatten-type
+                                                (first (tc:ty-predicate-types (tc:ty-class-instance-predicate instance)))))))
+                              (when (and (tc:tycon-p head) (eq (tc:tycon-name head) type))
+                                (loop :for (method . replacement) :in methods
+                                      :do (setf (gethash (nth (position method names)
+                                                              (tc:ty-class-instance-method-codegen-syms instance))
+                                                         table)
+                                                replacement)))))))
+              table))))
+
 (defun binding-code (program name)
   "The IR of the global NAME, and whether PROGRAM captured it. A binding
 compiled before capture, such as the standard library, has the IR Coalton
-kept from before it optimized."
-  (multiple-value-bind (node captured) (gethash name (program-bindings program))
+kept from before it optimized. A function the prelude replaces has the code of
+its replacement."
+  (multiple-value-bind (node captured)
+      (gethash (gethash name (replacements) name) (program-bindings program))
     (if captured
         (values node t)
-        (values (tc:lookup-source-code entry:*global-environment* name :no-error t) nil))))
+        (values (tc:lookup-source-code entry:*global-environment* (gethash name (replacements) name) :no-error t)
+                nil))))
 
 (defun global-references (node)
   "The global symbols NODE refers to, in the order first seen."
