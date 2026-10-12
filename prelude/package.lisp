@@ -30,7 +30,8 @@
 (defpackage #:sheaf/prelude/vector
   (:use #:coalton #:coalton-prelude)
   (:local-nicknames (#:vector #:coalton/vector))
-  (:export #:vector-fold #:vector-foldr #:vector-find-elem #:vector-sort-by!))
+  (:export #:vector-fold #:vector-foldr #:vector-find-elem #:vector-sort-by!
+           #:vector-with-initial-element))
 
 (defpackage #:sheaf/prelude/ref
   (:use #:coalton #:coalton-prelude)

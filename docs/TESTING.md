@@ -25,6 +25,7 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `vector-library.lisp` | `copy`, `subseq` with ranges reversed and past the end, `reverse!`, `resect!`, `set-capacity!`, `pop-unsafe!` and `with-capacity` |
 | `lists.lisp` | `map`, `take` and `length` of a list, which reverse a list they built |
 | `vector-folds.lisp` | `fold` and `foldr` with a closure, `sort!` and `sort-by!` with one, and `find-elem` found and missing |
+| `extend.lisp` | `Vector` `extend!`, `append` and `with-initial-element`, and a `HashTable` `extend!` from a list of pairs |
 | `returns.lisp` | An early return out of a branch, with a list built before it, past a `Vector` built locally, and from a lambda |
 | `returns-rejected.lisp` | A return out of a `catch` and of a `Vector` |
 | `voids.lisp` | A function returning `Void` whose branches produce no values |

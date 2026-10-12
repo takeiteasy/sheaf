@@ -21,6 +21,15 @@
       :while (> i 0)
       (values)))
 
+  (declare vector-with-initial-element (UFix * :elt -> (vector:Vector :elt)))
+  (define (vector-with-initial-element n x)
+    (let ((v (vector:with-capacity n)))
+      (for ((i 0 (+ i 1)))
+        :while (< i n)
+        (vector:push! x v)
+        (values))
+      v))
+
   (declare vector-find-elem (Eq :elt => :elt * (vector:Vector :elt) -> Optional UFix))
   (define (vector-find-elem e v)
     (for ((i 0 (+ i 1)))

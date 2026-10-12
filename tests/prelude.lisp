@@ -124,6 +124,12 @@
     (is (= expected (sheaf:run-lowered (lowered "vector-folds"))))
     (is (= expected (sheaf:run-lowered (assigned "vector-folds"))))))
 
+(test vectors-and-hashtables-filled-from-an-iterator-run-on-every-tier
+  (let ((expected (run-on-sbcl "extend")))
+    (is (zerop (count-ir (lowered "extend") 'sheaf:ir-foreign)))
+    (is (= expected (sheaf:run-lowered (lowered "extend"))))
+    (is (= expected (sheaf:run-lowered (assigned "extend"))))))
+
 (test list-functions-run-on-every-tier
   (dolist (fixture '("lists" "poly"))
     (let ((expected (run-on-sbcl fixture)))

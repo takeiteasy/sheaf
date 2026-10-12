@@ -74,6 +74,7 @@ which keeps the original.
 |---|---|
 | `Foldable Vector` `fold` and `foldr` | `vector-fold`, `vector-foldr` |
 | `coalton/vector:find-elem` | `vector-find-elem` |
+| `coalton/vector:with-initial-element` | `vector-with-initial-element`, since the original's iterator holds an assertion |
 | `coalton/vector:sort-by!` | `vector-sort-by!`, an insertion sort[^sort] |
 
 ## Where an array is built

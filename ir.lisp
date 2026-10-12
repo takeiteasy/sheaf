@@ -23,7 +23,8 @@ binding it defines."
 
 (defparameter *prelude-replacements*
   '((coalton/vector:find-elem . sheaf/prelude/vector:vector-find-elem)
-    (coalton/vector:sort-by! . sheaf/prelude/vector:vector-sort-by!))
+    (coalton/vector:sort-by! . sheaf/prelude/vector:vector-sort-by!)
+    (coalton/vector:with-initial-element . sheaf/prelude/vector:vector-with-initial-element))
   "The standard library functions whose raw Lisp the prelude replaces with Coalton,
 each with the function that stands in for it.")
 
