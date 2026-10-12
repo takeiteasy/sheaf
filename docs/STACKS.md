@@ -87,6 +87,18 @@ does when its arguments point only into parameters and globals[^bare]:
 
 A call that carries what it built keeps the region, as `build` does.
 
+A loop that builds growable values in a bank gives their slices back the same
+way, when its arguments reach none of them[^slices]:
+
+```lisp
+(define (probe n acc)                            ; each iteration's vector is freed
+  (let ((v (vector:new)))
+    (vector:push! acc v)
+    (if (== n 0) v (probe (- n 1) (+ acc (vector:length v))))))
+```
+
+A call that passes on a vector it built keeps its slices.
+
 ## Banks
 
 A cycle that builds a growable value at every level, such as `vectors-down`,
@@ -117,7 +129,7 @@ VECTORS-DOWN<UFIX → LIST (VECTOR UFIX)>{12}[dest 1 bank 2 busy 0 1 2]
 | `ir-call-growables` | The stacks the growable values of a result are built on |
 | `ir-call-bank` | The bank a result's growable values are built from |
 | `ir-call-region` | A region the call takes and frees |
-| `ir-call-reset` | The region a tail call frees back to where its iteration began |
+| `ir-call-reset` | The stacks and banks a tail call frees back to where its iteration began, each `(:stack index)` or `(:bank index)` |
 | `ir-let-stacks` | The stacks the growable values a `let` binds own |
 | `ir-let-bank` | The bank a `let` owns for a result it drops |
 | `ir-prim-bank` | The bank a growable value takes its stack from |
@@ -147,8 +159,6 @@ freed.
   [#29](https://github.com/takeiteasy/sheaf/issues/29).
 - A loop that passes storage built in an iteration to the next keeps all of it:
   [#30](https://github.com/takeiteasy/sheaf/issues/30).
-- A loop in a bank keeps the slices it takes each iteration:
-  [#31](https://github.com/takeiteasy/sheaf/issues/31).
 - A growable local live across a call back into its own cycle is an error:
   [#17](https://github.com/takeiteasy/sheaf/issues/17).
 
@@ -174,6 +184,10 @@ freed.
     region's top when the iteration starts and restores it before the jump
     ([EMITTER.md](EMITTER.md#calls)); the interpreter frees the cells above
     the mark, so a later read of one is an error.
+[^slices]: `root-summary-slice-free-calls` lists the calls whose arguments reach
+    only parameters, globals and values that hold no growable value. The
+    iteration saves the bank's head when it starts and the jump gives back the
+    slices taken since, as the owner of a bank does when it ends.
 [^region]: A cycle of functions whose results hold no storage and that build
     no cells or arrays takes no region. Growable values go on stacks of their
     own, so a cycle that builds only those takes none either.

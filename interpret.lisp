@@ -71,16 +71,18 @@ that owner took it, and the cells pushed since."
   "The catches being evaluated, innermost first, each its node, environment and tag.")
 
 (defvar *iteration-marks* '()
-  "What each stack a call in the running def resets held when the def was entered.")
+  "What each stack and bank a call in the running def resets held when the def was
+entered, each its kind, index and mark.")
 
 (defun resetting-stacks (def)
-  "The stacks the calls in DEF reset."
-  (let ((stacks '()))
+  "The stacks and banks the calls in DEF reset, each its kind and index."
+  (let ((resets '()))
     (walk-ir (lambda (node)
-               (when (and (ir-call-p node) (ir-call-reset node))
-                 (pushnew (ir-call-reset node) stacks)))
+               (when (ir-call-p node)
+                 (dolist (reset (ir-call-reset node))
+                   (pushnew reset resets :test #'equal))))
              (ir-def-body def))
-    stacks))
+    resets))
 
 (defun run-lowered (lowered)
   "Evaluate the root of LOWERED, a function of no arguments or a value. Raw Lisp
@@ -301,8 +303,11 @@ stacks and banks it saves, each with what it held on entry."
              (enter (def env)
                (let ((pool (ir-def-pool def))
                      (*iteration-marks* (and stacks
-                                             (loop :for index :in (resetting-stacks def)
-                                                   :collect (cons index (stack-items (stack index)))))))
+                                             (loop :for (kind index) :in (resetting-stacks def)
+                                                   :collect (list kind index
+                                                                  (ecase kind
+                                                                    (:stack (stack-items (stack index)))
+                                                                    (:bank (gethash index banks))))))))
                  (when pool (claim pool))
                  (let ((value (unwind-protect (evaluate (ir-def-body def) env)
                                 (when pool (release pool)))))
@@ -334,7 +339,8 @@ stacks and banks it saves, each with what it held on entry."
                          (region (ir-call-region node))
                          (reset (ir-call-reset node)))
                     (when (and stacks reset)
-                      (give-back-since (list (list :stack reset (cdr (assoc reset *iteration-marks*))))))
+                      (give-back-since (remove-if-not (lambda (mark) (member (butlast mark) reset :test #'equal))
+                                                      *iteration-marks*)))
                     (when region (claim region))
                     (unwind-protect (enter def env)
                       (when region (release region)))))

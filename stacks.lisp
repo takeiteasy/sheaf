@@ -56,6 +56,16 @@
 (defun resizable-node-p (node)
   (eq (size-class (ir-node-type node)) :resizable))
 
+(defun holds-growable-p (type &optional seen)
+  "Whether a value of TYPE is, or holds, a growable value, which a bank hands a slice to."
+  (and (not (member type seen))
+       (or (eq (size-class type) :resizable)
+           (some (lambda (inner)
+                   (and (ir-type-p inner) (holds-growable-p inner (cons type seen))))
+                 (if (eq (ir-type-kind type) :data)
+                     (field-types type)
+                     (ir-type-args type))))))
+
 ;;; Where a value goes
 
 (defun pattern-bindings (pattern)
@@ -452,6 +462,16 @@ nothing follows may give back what its iteration built."
                  (setf (ir-call-reset node) nil)))
              (ir-def-body def))))
 
+(defun iteration-resets (def node region bank)
+  "What the tail call NODE in DEF gives back to where its iteration began, each
+`(:stack index)` or `(:bank index)`: the region when its arguments point only into
+parameters and globals, and the bank when they reach no slice built in it."
+  (let ((summary (gethash (ir-def-name def) *summaries*)))
+    (append (and region (member node (root-summary-bare-calls summary) :test #'eq)
+                 (list (list :stack region)))
+            (and bank (member node (root-summary-slice-free-calls summary) :test #'eq)
+                 (list (list :bank bank))))))
+
 (defun assign-def (def clone destination growables bank region entry-busy)
   (let* ((cycle (gethash (ir-def-name def) *cycles*))
          (reached (reached-table def))
@@ -497,8 +517,7 @@ nothing follows may give back what its iteration built."
                               (when (set-difference busy entry-busy)
                                 (error "~s keeps a growable local across a call back into its recursive cycle: https://github.com/takeiteasy/sheaf/issues/17"
                                        (ir-def-name def)))
-                              (when (and region (member node (root-summary-bare-calls (gethash (ir-def-name def) *summaries*))))
-                                (setf (ir-call-reset copy) region))
+                              (setf (ir-call-reset copy) (iteration-resets def node region bank))
                               (clone-def callee dest stacks call-bank region entry-busy))
                              (callee-cycle
                               (let* ((own-region (and (null dest) (cdr callee-cycle) (take-index busy)))
@@ -656,8 +675,8 @@ stack below its stack count. Returns T."
                                                              (ir-call-growables node))))
                                (when (ir-call-region node)
                                  (check-index (ir-call-region node) "a call's region"))
-                               (when (ir-call-reset node)
-                                 (check-index (ir-call-reset node) "a call's reset")))
+                               (loop :for (nil index) :in (ir-call-reset node)
+                                     :do (check-index index "a call's reset")))
                       (ir-prim (cond ((ir-prim-bank node)
                                       (unless (eql (ir-prim-bank node) (ir-def-bank def))
                                         (error "~s: a growable value is built in a bank the def does not have" name)))

@@ -8,7 +8,7 @@
 (defvar *reference-types*)
 (defvar *here* nil "The location of the node being checked, for errors.")
 
-(defstruct (root-summary (:constructor make-root-summary (&key result stores locals reached bare-calls)))
+(defstruct (root-summary (:constructor make-root-summary (&key result stores locals reached bare-calls slice-free-calls)))
   "What a def does with the roots of its arguments. RESULT lists what its result
 may point into: a parameter index, `:global`, or `:fresh` for storage it builds
 in its caller's destinations. STORES lists the stores it leaves its caller to
@@ -16,8 +16,9 @@ check, each a parameter index, the parameter index or `:global` it is stored
 into, and the chain of places that justifies it. LOCALS maps each name to its
 roots. REACHED lists the locals whose storage the result holds, which are built
 in the caller's destinations. BARE-CALLS lists the calls whose arguments point
-only into parameters and globals."
-  (result '()) (stores '()) (locals nil) (reached '()) (bare-calls '()))
+only into parameters and globals, and SLICE-FREE-CALLS those whose arguments
+reach no growable value the def built."
+  (result '()) (stores '()) (locals nil) (reached '()) (bare-calls '()) (slice-free-calls '()))
 
 ;; op, how it treats roots, and the arguments it uses
 (defparameter *prim-roots*
@@ -109,6 +110,8 @@ is true a store that no caller could make safe is an error."
          (locals (make-hash-table :test 'eq))
          (stores '())
          (bare-calls '())
+         (call-roots '())
+         (growable-lets (make-hash-table :test 'eq))
          (pending '())
          (branches '())
          (*here* (ir-def-location def)))
@@ -185,7 +188,8 @@ is true a store that no caller could make safe is an error."
              (walk-let (node env depth owner)
                (let ((name (ir-let-name node))
                      (type (ir-node-type (ir-let-value node))))
-                 (setf (gethash name depths) depth
+                 (setf (gethash name growable-lets) (holds-growable-p type)
+                       (gethash name depths) depth
                        (gethash name origins) (list (format nil "a value of type ~a" (type-text (ir-node-type (ir-let-value node))))
                                                     (or (ir-node-location (ir-let-value node)) *here*)))
                  (let ((roots (let ((reached (walk (ir-let-value node) env depth name)))
@@ -227,6 +231,7 @@ is true a store that no caller could make safe is an error."
                  (when (every (lambda (roots) (every (lambda (root) (or (integerp root) (eq root :global))) roots))
                               arg-roots)
                    (push node bare-calls))
+                 (push (cons node arg-roots) call-roots)
                  (loop :for (from into trail) :in (root-summary-stores summary)
                        :do (check-store (nth from arg-roots)
                                         (if (eq into :global) (list :global) (nth into arg-roots))
@@ -336,7 +341,14 @@ REPORT is true, notes that they must not outlive what BODY frees."
                            :stores (reverse stores)
                            :locals locals
                            :reached reached
-                           :bare-calls bare-calls)))))
+                           :bare-calls bare-calls
+                           :slice-free-calls
+                           (loop :for (call . arg-roots) :in call-roots
+                                 :when (every (lambda (root)
+                                                (or (integerp root) (eq root :global)
+                                                    (not (gethash root growable-lets t))))
+                                              (closure (apply #'append arg-roots) (list contents links)))
+                                   :collect call))))))
 
 (defun root-summaries (lowered &key report)
   "A table from the name of each def in LOWERED to its `root-summary`. When

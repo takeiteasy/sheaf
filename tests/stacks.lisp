@@ -370,24 +370,27 @@ body BODY-FN builds from a function that makes a call of `make`."
 
 ;;; Loops
 
-(defun resets (fixture name)
-  "The reset of each call in the first clone of NAME in FIXTURE to a def of its own cycle."
-  (let ((def (first (clones fixture name))))
+(defun resets (fixture name &rest cycle)
+  "The reset of each call in the first clone of NAME in FIXTURE to a def of NAME
+or the functions in CYCLE."
+  (let* ((def (first (clones fixture name)))
+         (members (cons (sheaf:ir-def-origin def)
+                        (mapcar (lambda (member) (fixture-symbol fixture member)) cycle))))
     (loop :for call :in (calls def)
-          :when (eq (sheaf:ir-def-source (gethash (sheaf:ir-call-function call) (sheaf:lowered-defs (assigned fixture))))
-                    (sheaf:ir-def-source def))
+          :when (member (sheaf:ir-def-origin (gethash (sheaf:ir-call-function call) (sheaf:lowered-defs (assigned fixture))))
+                        members)
             :collect (sheaf:ir-call-reset call))))
 
 (test a-loop-that-carries-nothing-resets-its-region
   (let ((entry (call-to (first (clones "loops" "RUN")) "loops" "SCRATCH-LOOP")))
-    (is (equal (list (sheaf:ir-call-region entry)) (resets "loops" "SCRATCH-LOOP")))))
+    (is (equal (list (list (list :stack (sheaf:ir-call-region entry)))) (resets "loops" "SCRATCH-LOOP")))))
 
 (test loops-through-two-functions-reset
-  (is (every #'integerp (resets "loops" "PING")))
-  (is (every #'integerp (resets "loops" "PONG"))))
+  (is (equal '(t) (mapcar #'consp (resets "loops" "PING" "PONG"))))
+  (is (equal '(t) (mapcar #'consp (resets "loops" "PONG" "PING")))))
 
 (test a-loop-that-passes-a-parameter-through-resets
-  (is (every #'integerp (resets "loops" "WALK-LIST"))))
+  (is (every #'consp (resets "loops" "WALK-LIST"))))
 
 (test a-loop-that-carries-what-it-builds-keeps-its-region
   (is (equal '(nil) (resets "tail" "BUILD"))))
@@ -397,3 +400,18 @@ body BODY-FN builds from a function that makes a call of `make`."
 
 (test resetting-loops-keep-their-results
   (is (= 15850 (sheaf:run-lowered (assigned "loops")))))
+
+(defun bank-of (fixture name)
+  "The bank of the first clone of NAME in FIXTURE."
+  (sheaf:ir-def-bank (first (clones fixture name))))
+
+(test a-banked-loop-gives-back-its-slices
+  (is (equal (list (list (list :bank (bank-of "banked-loops" "PROBE")))) (resets "banked-loops" "PROBE")))
+  (is (equal (list (list (list :bank (bank-of "banked-loops" "PING")))) (resets "banked-loops" "PING" "PONG")))
+  (is (equal (list (list (list :bank (bank-of "banked-loops" "PONG")))) (resets "banked-loops" "PONG" "PING"))))
+
+(test a-banked-loop-that-passes-on-what-it-built-keeps-its-slices
+  (is (equal '(nil) (resets "banked-loops" "CARRY"))))
+
+(test resetting-banked-loops-keep-their-results
+  (is (= 37 (sheaf:run-lowered (assigned "banked-loops")))))

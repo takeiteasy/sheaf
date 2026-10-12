@@ -522,6 +522,13 @@ returns the expression."
 
 ;;; Statements
 
+(defun mark-declaration (kind index mark)
+  "The declaration of the C variable MARK, which saves the top of a stack or the
+head of a bank."
+  (ecase kind
+    (:stack `(:decl (:ptr (:name "char")) ,mark (:dot ,(stack-node index) "top") :unused t))
+    (:bank `(:decl (:ptr (:name "sheaf_slice")) ,mark (:dot ,(bank-node index) "head") :unused t))))
+
 (defun owned-marks (stacks bank)
   "What a scope that owns STACKS and BANK gives back when it ends, each `:stack`
 or `:bank`, its index and the C variable holding its mark, and the declarations
@@ -531,9 +538,7 @@ that save the marks."
                        (and bank (list (list :bank bank (fresh-c-name (make-symbol "MARK"))))))))
     (values owned
             (loop :for (kind index mark) :in owned
-                  :collect (ecase kind
-                             (:stack `(:decl (:ptr (:name "char")) ,mark (:dot ,(stack-node index) "top") :unused t))
-                             (:bank `(:decl (:ptr (:name "sheaf_slice")) ,mark (:dot ,(bank-node index) "head") :unused t)))))))
+                  :collect (mark-declaration kind index mark)))))
 
 (defun emit-releases (releases)
   "The statements that give RELEASES back."
@@ -579,8 +584,8 @@ names of the defs that tail call each other."
           ,@(loop :for (nil name) :in params
                   :for temp :in temps
                   :collect `(:assign ,(var name) ,(var temp)))
-          ,@(when (ir-call-reset node)
-              `((:assign (:dot ,(stack-node (ir-call-reset node)) "top") ,(var "iter_mark"))))
+          ,@(emit-releases (loop :for (kind index) :in (ir-call-reset node)
+                                 :collect (list kind index (iteration-mark kind index))))
           (:goto ,label))))))
 
 (defun pattern-code (pattern access)
@@ -809,12 +814,14 @@ in the frame, which then goes on unwinding."
   (loop :for (symbol . type) :in (ir-def-params def)
         :collect (list (c-type type) (fresh-c-name symbol))))
 
-(defun resetting-stack ()
-  "The stack a tail call being emitted resets, which the body saves at each iteration's start."
-  (block found
-    (dolist (call *tail-calls*)
-      (when (ir-call-reset call)
-        (return-from found (ir-call-reset call))))))
+(defun iteration-mark (kind index)
+  "The name of the C variable that saves a stack or bank at each iteration's start."
+  (format nil "iter_mark_~(~a~)_~d" kind index))
+
+(defun tail-resets ()
+  "The stacks and banks the tail calls being emitted reset, each its kind and index."
+  (remove-duplicates (loop :for call :in *tail-calls* :append (ir-call-reset call))
+                     :test #'equal))
 
 (defun emit-body (def params)
   "The statements of DEF's body once PARAMS, its C parameters, hold the arguments.
@@ -828,9 +835,8 @@ A value stores its result in the static `value`."
     (append
      (when *releases*
        `((:decl (:ptr (:name "char")) "pool_mark" (:dot ,(stack-node (ir-def-pool def)) "top") :unused t)))
-     (let ((reset (resetting-stack)))
-       (when reset
-         `((:decl (:ptr (:name "char")) "iter_mark" (:dot ,(stack-node reset) "top") :unused t))))
+     (loop :for (kind index) :in (tail-resets)
+           :collect (mark-declaration kind index (iteration-mark kind index)))
      (cond ((eq (ir-def-kind def) :value)
             (append (emit-node (ir-def-body def) "value" env)
                     (emit-releases *releases*)

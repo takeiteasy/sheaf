@@ -166,3 +166,11 @@ and exit code."
 (test a-resetting-tail-call-gives-its-stack-back-before-it-jumps
   (is (nodes-of (sheaf:c-program (big-loops)) :goto))
   (is (search "iter_mark" (with-output-to-string (out) (sheaf:emit-c (big-loops) out)))))
+
+(test a-banked-loop-runs-in-a-small-bank
+  (is (= 37 (c-result "banked-loops")))
+  (loop :for (root expected) :in '(("BIG-PROBE" 200000) ("BIG-PING" 150000))
+        :do (multiple-value-bind (output errors code)
+                (apply #'run-c (sheaf:assign-stacks (lowered-from "banked-loops" root)) *small-banks*)
+              (is (zerop code) "~a: ~a" root errors)
+              (is (= expected (parse-integer output)) "~a" root))))
