@@ -8,9 +8,11 @@
     (coalton:u32 "uint32_t" :wrap 32) (coalton:u16 "uint16_t" :wrap 16) (coalton:u8 "uint8_t" :wrap 8)
     (coalton:ifix "int64_t" :trap 64) (coalton:integer "int64_t" :trap 64) (coalton:i64 "int64_t" :trap 64)
     (coalton:i32 "int32_t" :trap 32) (coalton:i16 "int16_t" :trap 16) (coalton:i8 "int8_t" :trap 8)
-    (coalton:f64 "double" :float 64) (coalton:f32 "float" :float 32))
+    (coalton:f64 "double" :float 64) (coalton:f32 "float" :float 32)
+    (coalton:char "uint32_t" :code-point 32))
   "The numeric types: the C type, the kind of overflow, `:wrap` or `:trap`, or
-`:float`, and the width in bits of each.")
+`:float`, and the width in bits of each. A `Char` is a number that is compared
+only, and its kind is `:code-point`.")
 
 (defun numeric-entry (name)
   (assoc name *numeric-types*))

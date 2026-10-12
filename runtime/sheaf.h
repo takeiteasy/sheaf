@@ -137,6 +137,91 @@ static SHEAF_UNUSED uint64_t sheaf_index(uint64_t index, uint64_t length) {
     return index;
 }
 
+/* Strings are arrays of UTF-8 bytes; their length and index count code points. */
+/* TODO: each of these scans the bytes, so indexing every character is O(n^2); cache the length or use a fixed-width encoding
+   https://github.com/takeiteasy/sheaf/issues/51 */
+static SHEAF_UNUSED uint64_t sheaf_utf8_count(const uint8_t *e, uint64_t n) {
+    uint64_t count = 0;
+    for (uint64_t i = 0; i < n; i++)
+        count += (e[i] & 0xC0) != 0x80;
+    return count;
+}
+
+/* The byte offset of code point K, or N if K is the number of code points. */
+static SHEAF_UNUSED uint64_t sheaf_utf8_offset(const uint8_t *e, uint64_t n, uint64_t k) {
+    uint64_t i = 0;
+    for (; i < n; i++) {
+        if ((e[i] & 0xC0) != 0x80) {
+            if (k == 0)
+                return i;
+            k--;
+        }
+    }
+    return n;
+}
+
+static SHEAF_UNUSED uint32_t sheaf_utf8_decode(const uint8_t *e) {
+    if (e[0] < 0x80)
+        return e[0];
+    if (e[0] < 0xE0)
+        return ((uint32_t)(e[0] & 0x1F) << 6) | (e[1] & 0x3F);
+    if (e[0] < 0xF0)
+        return ((uint32_t)(e[0] & 0x0F) << 12) | ((uint32_t)(e[1] & 0x3F) << 6) | (e[2] & 0x3F);
+    return ((uint32_t)(e[0] & 0x07) << 18) | ((uint32_t)(e[1] & 0x3F) << 12)
+         | ((uint32_t)(e[2] & 0x3F) << 6) | (e[3] & 0x3F);
+}
+
+static SHEAF_UNUSED uint32_t sheaf_string_ref(const uint8_t *e, uint64_t n, uint64_t k) {
+    uint64_t offset = sheaf_utf8_offset(e, n, k);
+    if (offset >= n) {
+        fprintf(stderr, "the index %llu is outside the string of %llu characters\n",
+                (unsigned long long)k, (unsigned long long)sheaf_utf8_count(e, n));
+        exit(1);
+    }
+    return sheaf_utf8_decode(e + offset);
+}
+
+/* The byte range of the substring from character START to END, which may come in either order. */
+static SHEAF_UNUSED void sheaf_string_range(const uint8_t *e, uint64_t n, uint64_t start, uint64_t end,
+                                            uint64_t *from, uint64_t *to) {
+    uint64_t length = sheaf_utf8_count(e, n);
+    uint64_t low = start < end ? start : end;
+    uint64_t high = start < end ? end : start;
+    if (high > length)
+        high = length;
+    if (low > high) {
+        fprintf(stderr, "the range %llu to %llu is outside the string of %llu characters\n",
+                (unsigned long long)low, (unsigned long long)high, (unsigned long long)length);
+        exit(1);
+    }
+    *from = sheaf_utf8_offset(e, n, low);
+    *to = sheaf_utf8_offset(e, n, high);
+}
+
+static SHEAF_UNUSED int sheaf_string_compare(const uint8_t *a, uint64_t na, const uint8_t *b, uint64_t nb) {
+    int order = memcmp(a, b, na < nb ? na : nb);
+    if (order != 0)
+        return order;
+    return na < nb ? -1 : na > nb;
+}
+
+static SHEAF_UNUSED uint32_t sheaf_code_char(uint64_t code) {
+    if (code >= 0x110000) {
+        fprintf(stderr, "the code %llu is not a character\n", (unsigned long long)code);
+        exit(1);
+    }
+    return (uint32_t)code;
+}
+
+/* Write the decimal text of V to OUT, which holds 24 bytes. Returns its length. */
+static SHEAF_UNUSED uint64_t sheaf_signed_text(uint8_t *out, int64_t v) {
+    return (uint64_t)snprintf((char *)out, 24, "%lld", (long long)v);
+}
+
+static SHEAF_UNUSED uint64_t sheaf_unsigned_text(uint8_t *out, uint64_t v) {
+    return (uint64_t)snprintf((char *)out, 24, "%llu", (unsigned long long)v);
+}
+
 static SHEAF_UNUSED void sheaf_range(uint64_t lo, uint64_t hi, uint64_t length) {
     if (lo > hi || hi > length) {
         fprintf(stderr, "the range %llu to %llu is outside the array of %llu elements\n",

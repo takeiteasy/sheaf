@@ -21,6 +21,7 @@ on stacks the compiler assigns, and memory is freed when its scope ends.
 | [ROOTS.md](docs/ROOTS.md) | Checking that references outlive their stores |
 | [NUMBERS.md](docs/NUMBERS.md) | Numeric types and what overflow does |
 | [PRELUDE.md](docs/PRELUDE.md) | Arrays, slices and references |
+| [STRINGS.md](docs/STRINGS.md) | `Char` and `String` |
 | [STACKS.md](docs/STACKS.md) | Assigning data stacks to cells and growable values |
 | [EMITTER.md](docs/EMITTER.md) | Emitting C and the data stack runtime |
 | [EXCEPTIONS.md](docs/EXCEPTIONS.md) | `throw`, `catch` and `protect` |

@@ -15,6 +15,8 @@ and `max` reach them through `<=>`.
 (+ (the I8 127) 1)    ; error: Overflow: 128 does not fit I8
 ```
 
+A `Char` is a `uint32_t` that is only compared ([STRINGS.md](STRINGS.md)).
+
 The interpreter and the C program give the same result for every operation.
 
 ## Conversions

@@ -14,7 +14,8 @@
                (:file "stack")
                (:file "ref")
                (:file "vector")
-               (:file "hashtable")))
+               (:file "hashtable")
+               (:file "string")))
 
 (asdf:defsystem #:sheaf
   :description "A statically typed Lisp with no heap, built on a Coalton frontend"
@@ -51,6 +52,7 @@
                (:file "emit")
                (:file "prelude")
                (:file "numbers")
+               (:file "strings")
                (:file "roots")
                (:file "exceptions"))
   :perform (asdf:test-op (o c) (uiop:symbol-call '#:sheaf/tests '#:run)))

@@ -50,7 +50,7 @@ does.
 
 - Standard library functions whose source holds raw Lisp stay raw Lisp unless the
   prelude replaces them ([PRELUDE.md](PRELUDE.md#replacements)):
-  [#22](https://github.com/takeiteasy/sheaf/issues/22).
+  [#50](https://github.com/takeiteasy/sheaf/issues/50).
 - Raw Lisp in user code other than `assert`, `unreachable` and `error` with a
   string literal stays raw Lisp ([EXCEPTIONS.md](EXCEPTIONS.md#panics)):
   [#48](https://github.com/takeiteasy/sheaf/issues/48).

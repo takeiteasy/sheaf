@@ -543,8 +543,9 @@ for everything it evaluates first."
   (let ((*location* (or (ast:node-location node) *location*)))
     (etypecase node
       (ast:node-literal
-       (make-ir-literal :value (ast:node-literal-value node)
-                        :type (lower-type (ast:node-type node)) :location *location*))
+       (let ((value (ast:node-literal-value node)))
+         (make-ir-literal :value (if (characterp value) (char-code value) value)
+                          :type (lower-type (ast:node-type node)) :location *location*)))
       (ast:node-variable (lower-variable node))
       (ast:node-application
        (when (ast:node-application-keyword-rands node)

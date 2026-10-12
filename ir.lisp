@@ -27,14 +27,22 @@ binding it defines."
     (coalton/vector:with-initial-element . sheaf/prelude/vector:vector-with-initial-element)
     (coalton/hashtable:entries . sheaf/prelude/hashtable:hashtable-entries)
     (coalton/hashtable:keys . sheaf/prelude/hashtable:hashtable-keys)
-    (coalton/hashtable:values-iter . sheaf/prelude/hashtable:hashtable-values-iter))
+    (coalton/hashtable:values-iter . sheaf/prelude/hashtable:hashtable-values-iter)
+    (coalton/char:code-char . sheaf/prelude/string:char-code-char)
+    (coalton/char:ascii-alpha? . sheaf/prelude/string:char-ascii-alpha?)
+    (coalton/char:ascii-digit? . sheaf/prelude/string:char-ascii-digit?)
+    (coalton/char:ascii-uppercase? . sheaf/prelude/string:char-ascii-uppercase?)
+    (coalton/char:ascii-lowercase? . sheaf/prelude/string:char-ascii-lowercase?)
+    (coalton/char:digit->ufix . sheaf/prelude/string:char-digit->ufix))
   "The standard library functions whose raw Lisp the prelude replaces with Coalton,
 each with the function that stands in for it.")
 
 (defparameter *prelude-method-replacements*
   '((coalton/classes:foldable coalton/vector:vector
      (coalton/classes:fold . sheaf/prelude/vector:vector-fold)
-     (coalton/classes:foldr . sheaf/prelude/vector:vector-foldr)))
+     (coalton/classes:foldr . sheaf/prelude/vector:vector-foldr))
+    (coalton/classes:semigroup coalton:string
+     (coalton/classes:<> . sheaf/prelude/string:string-append)))
   "The instance methods the prelude replaces: a class, the type whose instance it
 is, and each method with the function that stands in for it.")
 

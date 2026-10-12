@@ -49,6 +49,14 @@ that owner took it, and the cells pushed since."
          (make-datum (constructor-named lowered type (cond ((< a b) "LT") ((> a b) "GT") (t "EQ")))
                      '()))))))
 
+(defun string-bytes (text)
+  "The UTF-8 bytes of the Lisp string TEXT."
+  (coerce (sb-ext:string-to-octets text :external-format :utf-8) 'simple-vector))
+
+(defun bytes-string (bytes)
+  "The Lisp string the UTF-8 BYTES hold."
+  (sb-ext:octets-to-string (coerce bytes '(vector (unsigned-byte 8))) :external-format :utf-8))
+
 (defun match-pattern (pattern value env)
   "Whether VALUE matches PATTERN, and ENV extended with the variables it binds."
   (etypecase pattern
@@ -232,6 +240,13 @@ stacks and banks it saves, each with what it held on entry."
                               (unless (< -1 index (length fields))
                                 (error "The index ~d is outside the vector of ~d elements" index (length fields)))
                               index))
+                          (text (string what)
+                            (live string what)
+                            (bytes-string (datum-fields string)))
+                          (new-string (text)
+                            (allocate :variable (string-bytes text) node))
+                          (nullary (name)
+                            (make-datum (constructor-named lowered type name) '()))
                           (position-in (value index)
                             (multiple-value-bind (vector start end) (view value)
                               (unless (< -1 index (- end start))
@@ -376,6 +391,46 @@ stacks and banks it saves, each with what it held on entry."
                             (error "The range ~d to ~d is outside the array of ~d elements" lo hi (- end start)))
                           (make-slice-value (if (typep source 'storage) source (slice-value-target source))
                                             (+ start lo) (+ start hi)))))
+                     (:string-length (length (text (first args) "A string read")))
+                     (:string-concat
+                      (live (first args) "A string read")
+                      (live (second args) "A string read")
+                      (allocate :variable (concatenate 'simple-vector (datum-fields (first args))
+                                                       (datum-fields (second args)))
+                                node))
+                     (:string-substring
+                      (destructuring-bind (string start end) args
+                        (let* ((text (text string "A string read"))
+                               (low (max 0 (min start end)))
+                               (high (min (length text) (max start end))))
+                          (when (> low high)
+                            (error "The range ~d to ~d is outside the string of ~d characters" low high (length text)))
+                          (new-string (subseq text low high)))))
+                     (:string-ref
+                      (let ((text (text (first args) "A string read")))
+                        (unless (< (second args) (length text))
+                          (error "The index ~d is outside the string of ~d characters" (second args) (length text)))
+                        (char-code (char text (second args)))))
+                     (:string-eq
+                      (live (first args) "A string read")
+                      (live (second args) "A string read")
+                      (nullary (if (equalp (datum-fields (first args)) (datum-fields (second args))) "TRUE" "FALSE")))
+                     (:string-compare
+                      (live (first args) "A string read")
+                      (live (second args) "A string read")
+                      (let ((a (datum-fields (first args))) (b (datum-fields (second args))))
+                        (let ((i (mismatch a b)))
+                          (nullary (cond ((null i) "EQ")
+                                         ((= i (length a)) "LT")
+                                         ((= i (length b)) "GT")
+                                         ((< (aref a i) (aref b i)) "LT")
+                                         (t "GT"))))))
+                     (:integer-to-string (new-string (format nil "~d" (first args))))
+                     (:char-code (first args))
+                     (:code-char
+                      (unless (< (first args) #x110000)
+                        (error "The code ~d is not a character" (first args)))
+                      (first args))
                      (:cell-read
                       (live (first args) "A cell read")
                       (aref (datum-fields (first args)) 0))
@@ -450,7 +505,10 @@ stacks and banks it saves, each with what it held on entry."
                                   new))))
              (evaluate (node env)
                (etypecase node
-                 (ir-literal (ir-literal-value node))
+                 (ir-literal (let ((value (ir-literal-value node)))
+                               (if (stringp value)
+                                   (make-storage :variable (string-bytes value) nil)
+                                   value)))
                  (ir-local (cdr (assoc (ir-local-name node) env)))
                  (ir-global (force (ir-global-name node)))
                  (ir-let

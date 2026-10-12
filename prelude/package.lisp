@@ -46,3 +46,9 @@
   (:use #:coalton #:coalton-prelude)
   (:local-nicknames (#:prelude #:sheaf/prelude))
   (:export #:get #:set!))
+
+(defpackage #:sheaf/prelude/string
+  (:use #:coalton #:coalton-prelude)
+  (:local-nicknames (#:char #:coalton/char) (#:string #:coalton/string))
+  (:export #:string-append #:char-code-char #:char-ascii-alpha? #:char-ascii-digit? #:char-ascii-uppercase?
+           #:char-ascii-lowercase? #:char-digit->ufix))

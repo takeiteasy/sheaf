@@ -51,7 +51,7 @@
   (is (zerop (count-ir (lowered "vectors") 'sheaf:ir-foreign)))
   (is (zerop (count-ir (lowered "hashtables") 'sheaf:ir-foreign)))
   (is (equal (sort (mapcar #'first sheaf::*prelude-ops*) #'string<)
-             (prelude-ops-used "arrays" "cells" "vectors" "hashtables" "vector-library" "lists" "table-iterators"))))
+             (prelude-ops-used "arrays" "cells" "vectors" "hashtables" "vector-library" "lists" "table-iterators" "strings"))))
 
 (test standard-library-functions-run-on-every-tier
   (let ((expected (run-on-sbcl "stdlib")))

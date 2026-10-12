@@ -66,14 +66,18 @@ order. Returns BODY's value, an expression, and the statements."
 (defun storage-layout (type)
   "How TYPE is laid out in C: `:array`, `:grow`, `:table`, `:slice`, `:pointer`, or nil."
   (let ((name (ir-type-name type)))
-    (cond ((member name '(sheaf/prelude:fixedarray sheaf/prelude:array)) :array)
+    (cond ((member name '(sheaf/prelude:fixedarray sheaf/prelude:array coalton:string)) :array)
           ((member name '(sheaf/prelude:growarray sheaf/prelude:stack coalton/vector:vector)) :grow)
           ((eq name 'coalton/hashtable:hashtable) :table)
           ((eq name 'sheaf/prelude:slice) :slice)
           ((member name '(sheaf/prelude:ref coalton/cell:cell)) :pointer))))
 
+(defvar *byte-type* (make-ir-type nil :scalar 'coalton:u8 '()) "The element type of a `String`.")
+
 (defun element-type (type)
-  (first (last (ir-type-args type))))
+  (if (eq (ir-type-name type) 'coalton:string)
+      *byte-type*
+      (first (last (ir-type-args type)))))
 
 (defun array-struct (layout type)
   "The name of the C struct for LAYOUT, `:array`, `:grow`, `:table` or `:slice`, of elements like TYPE's."
@@ -88,7 +92,7 @@ order. Returns BODY's value, an expression, and the statements."
     (:scalar (let ((c-type (numeric-c-type (ir-type-name type))))
                (if c-type
                    `(:name ,c-type)
-                   (emit-error "the type ~a: https://github.com/takeiteasy/sheaf/issues/22" (type-text type)))))
+                   (emit-error "the type ~a" (type-text type)))))
     ((:storage :view)
      (let ((layout (storage-layout type)))
        (case layout
@@ -165,10 +169,38 @@ order. Returns BODY's value, an expression, and the statements."
 (defun bank-node (index)
   `(:index (:name "sheaf_banks") (:int ,index)))
 
+(defvar *string-literals*)
+
+(defun string-literal (text type)
+  "A C expression for the static `String` TEXT of TYPE."
+  (let ((entry (or (gethash text *string-literals*)
+                   (setf (gethash text *string-literals*)
+                         (cons (fresh-c-name (make-symbol "TEXT"))
+                               (sb-ext:string-to-octets text :external-format :utf-8))))))
+    `(:cast ,(c-type type) (:addr (:name ,(car entry))))))
+
+(defun string-literal-definitions ()
+  "The static data of the string literals: a struct for each length, and a value for each text."
+  (let ((entries '()))
+    (maphash (lambda (text entry) (declare (ignore text)) (push entry entries)) *string-literals*)
+    (setf entries (sort entries #'string< :key #'car))
+    (append (loop :for length :in (sort (remove-duplicates (mapcar (lambda (entry) (length (cdr entry))) entries)) #'<)
+                  :collect `(:struct-def ,(format nil "X~d" length)
+                                         (:field (:name "uint64_t") "length")
+                                         (:field (:name "uint8_t") ,(format nil "e[~d]" (1+ length)))))
+            (loop :for (name . bytes) :in entries
+                  :collect `(:decl (:struct ,(format nil "X~d" (length bytes))) ,name
+                                   (:init (:int ,(length bytes)) (:init ,@(loop :for byte :across bytes :collect `(:int ,byte)) (:int 0)))
+                                   :static t :unused t)))))
+
 (defun c-literal (value type)
+  (when (stringp value)
+    (return-from c-literal (string-literal value type)))
   (let* ((name (ir-type-name type))
          (bits (numeric-bits name)))
     (case (numeric-kind name)
+      (:code-point (when (typep value '(integer 0 #x10FFFF))
+                     (return-from c-literal `(:call "UINT32_C" (:int ,value)))))
       (:wrap (when (typep value `(unsigned-byte ,bits))
                (return-from c-literal `(:call ,(format nil "UINT~d_C" bits) (:int ,value)))))
       (:trap (when (typep value `(signed-byte ,bits))
@@ -558,6 +590,84 @@ Returns its C variable."
 
 (define-prelude-op :hashtable-count
   `(:cast (:name "int64_t") (:dot (:-> ,a "table") "count")))
+
+(defun new-string (node length)
+  "Push the string NODE builds with the byte count LENGTH, a C variable. Returns its C variable."
+  (let* ((type (ir-node-type node))
+         (string (fresh-c-name (make-symbol "STRING")))
+         (struct `(:struct ,(array-struct :array type))))
+    (emit-stmt `(:decl ,(c-type type) ,string
+                       (:call "sheaf_push" (:addr ,(stack-node (ir-prim-stack node)))
+                              (:+ (:offsetof ,struct "e") ,length) (:alignof ,struct))))
+    (emit-stmt `(:assign (:-> ,(var string) "length") ,length))
+    (var string)))
+
+(defun copy-bytes (to offset from length)
+  "Copy LENGTH bytes of the string FROM, starting at the byte OFFSET, to the string TO."
+  (emit-stmt `(:expr (:call "memcpy" (:+ (:-> ,to "e") ,offset) (:-> ,from "e") ,length))))
+
+(defun string-test (type test)
+  "A `Boolean` of TYPE that is true when the C expression TEST is."
+  (flet ((tag (name) `(:int ,(ir-constructor-tag (named-constructor *lowered* type name)))))
+    `(:compound ,(c-type type) (".tag" (:? ,test ,(tag "TRUE") ,(tag "FALSE"))))))
+
+(define-prelude-op :string-length
+  `(:call "sheaf_utf8_count" (:-> ,a "e") (:-> ,a "length")))
+
+(define-prelude-op :string-ref
+  `(:call "sheaf_string_ref" (:-> ,a "e") (:-> ,a "length") ,b))
+
+(define-prelude-op :string-eq
+  (string-test type `(:== (:call "sheaf_string_compare" (:-> ,a "e") (:-> ,a "length") (:-> ,b "e") (:-> ,b "length"))
+                          (:int 0))))
+
+(define-prelude-op :string-compare
+  (let ((order (fresh-c-name (make-symbol "ORDER"))))
+    (flet ((tag (name) `(:int ,(ir-constructor-tag (named-constructor *lowered* type name)))))
+      (emit-stmt `(:decl (:name "int") ,order
+                         (:call "sheaf_string_compare" (:-> ,a "e") (:-> ,a "length") (:-> ,b "e") (:-> ,b "length"))))
+      `(:compound ,(c-type type)
+                  (".tag" (:? (:< ,(var order) (:int 0)) ,(tag "LT")
+                              (:? (:> ,(var order) (:int 0)) ,(tag "GT") ,(tag "EQ"))))))))
+
+(define-prelude-op :string-concat
+  (let* ((length (fresh-c-name (make-symbol "LENGTH")))
+         (string (progn
+                   (emit-stmt `(:decl (:name "uint64_t") ,length (:+ (:-> ,a "length") (:-> ,b "length"))))
+                   (new-string node (var length)))))
+    (copy-bytes string '(:int 0) a `(:-> ,a "length"))
+    (copy-bytes string `(:-> ,a "length") b `(:-> ,b "length"))
+    string))
+
+(define-prelude-op :string-substring
+  (let ((from (fresh-c-name (make-symbol "FROM")))
+        (to (fresh-c-name (make-symbol "TO")))
+        (length (fresh-c-name (make-symbol "LENGTH"))))
+    (emit-stmt `(:decl (:name "uint64_t") ,from (:int 0)))
+    (emit-stmt `(:decl (:name "uint64_t") ,to (:int 0)))
+    (emit-stmt `(:expr (:call "sheaf_string_range" (:-> ,a "e") (:-> ,a "length") ,b ,c
+                              (:addr ,(var from)) (:addr ,(var to)))))
+    (emit-stmt `(:decl (:name "uint64_t") ,length (:- ,(var to) ,(var from))))
+    (let ((string (new-string node (var length))))
+      (emit-stmt `(:expr (:call "memcpy" (:-> ,string "e") (:+ (:-> ,a "e") ,(var from)) ,(var length))))
+      string)))
+
+(define-prelude-op :integer-to-string
+  (let ((digits (fresh-c-name (make-symbol "DIGITS")))
+        (length (fresh-c-name (make-symbol "LENGTH")))
+        (signed (member (numeric-kind (ir-type-name (first arg-types))) '(:trap))))
+    (emit-stmt `(:decl (:name "uint8_t") ,digits nil :array 24))
+    (emit-stmt `(:decl (:name "uint64_t") ,length
+                       (:call ,(if signed "sheaf_signed_text" "sheaf_unsigned_text") ,(var digits) ,a)))
+    (let ((string (new-string node (var length))))
+      (emit-stmt `(:expr (:call "memcpy" (:-> ,string "e") ,(var digits) ,(var length))))
+      string)))
+
+(define-prelude-op :char-code
+  `(:cast (:name "uint64_t") ,a))
+
+(define-prelude-op :code-char
+  `(:call "sheaf_code_char" ,a))
 
 (defun prelude-expr (node env)
   "A C expression for the prelude operation NODE, and the statements it needs first."
@@ -1327,6 +1437,7 @@ and the types they hold."
         (*def-tail-calls* (make-hash-table :test 'eq))
         (*def-cycle* (make-hash-table :test 'eq))
         (*aux* '())
+        (*string-literals* (make-hash-table :test 'equal))
         (*copies* (make-hash-table :test 'eq))
         (defs (lowered-defs assigned))
         (stacks (max 1 (lowered-stack-count assigned)))
@@ -1365,6 +1476,7 @@ and the types they hold."
         ,@(array-definitions '(:slice))
         ,@types
         ,@(array-definitions '(:array :grow :table))
+        ,@(string-literal-definitions)
         (:blank)
         (:decl (:name "sheaf_stack") "sheaf_stacks" nil :static t :array ,stacks)
         (:decl (:name "sheaf_bank") "sheaf_banks" nil :static t :array ,stacks :unused t)

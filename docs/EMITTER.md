@@ -59,6 +59,8 @@ The excerpt omits `SHEAF_UNUSED` attributes.
 | IR type | C |
 |---|---|
 | A numeric type | Its C type ([NUMBERS.md](NUMBERS.md)) |
+| `Char` | `uint32_t`, a code point ([STRINGS.md](STRINGS.md)) |
+| `String` | `struct An *` of `uint8_t`: a `length` in bytes and the UTF-8 bytes; a literal is static data |
 | A data type that contains itself | `struct Tn *`, a cell on a data stack[^links] |
 | Any other data type | `struct Tn` by value: a `tag` and a union of the constructors' fields |
 | `FixedArray`, `Array` | `struct An *`: a `length` and the elements[^layout] |
@@ -121,8 +123,7 @@ A slice past either limit prints `bank space exhausted` or `a bank slice exhaust
   [#24](https://github.com/takeiteasy/sheaf/issues/24).
 - Raw Lisp that is not a known panic is an error naming its offset:
   [#48](https://github.com/takeiteasy/sheaf/issues/48).
-- A scalar type that is not a number, such as `Char` or `String`:
-  [#22](https://github.com/takeiteasy/sheaf/issues/22).
+- A scalar type that is not a number or a `Char`, such as `Symbol`, is an error.
 - `Integer` is 64 bits: [#19](https://github.com/takeiteasy/sheaf/issues/19).
 - Cells are linked by pointers, not relative references:
   [#13](https://github.com/takeiteasy/sheaf/issues/13).

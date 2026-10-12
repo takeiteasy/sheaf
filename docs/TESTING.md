@@ -51,6 +51,7 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `growable-recursion.lisp` | A growable local kept across a call back into its recursive cycle, which stack assignment rejects |
 | `hashtables.lisp` | Hash tables built locally and returned, and every operation on them |
 | `numbers.lisp` | Arithmetic, equality and ordering of each numeric type, overflow, and arrays and hash tables of numbers, on SBCL, the interpreter and in C |
+| `strings.lisp` | `Char` and `String`: literals with multi-byte text, comparison, `length`, `ref`, `substring`, `concat`, `chars`, integers to text, strings built in a loop, and an index or range outside a string, on SBCL, the interpreter and in C |
 | `own-indexed.lisp` | A program's own instance of the prelude's `Indexed` class, which stays an ordinary function |
 | `placement.lisp` | Where storage is built when a result holds only some of it |
 | `vectors.lisp` | Vectors built locally and returned, and every operation on them |

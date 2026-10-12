@@ -33,6 +33,7 @@
 | `(Cell :t)` | Fixed | One element; Coalton's `coalton/cell:Cell` |
 | `(Vector :t)` | Resizable, grow-shrink | Elements; Coalton's `coalton/vector:Vector`, with no references or slices |
 | `(HashTable :k :v)` | Resizable, grow-shrink | Entries; Coalton's `coalton/hashtable:HashTable`, with no references or slices |
+| `String` | Variable | UTF-8 bytes; Coalton's `String` ([STRINGS.md](STRINGS.md)) |
 
 A `HashTable` has `UFix` keys and any value type. Its `Hash` and `Eq`
 instances are not consulted: keys compare as numbers.
@@ -78,6 +79,8 @@ which keeps the original.
 | `coalton/vector:with-initial-element` | `vector-with-initial-element`, since the original's iterator holds an assertion |
 | `coalton/hashtable:entries`, `keys`, `values-iter` | `hashtable-entries`, `hashtable-keys`, `hashtable-values-iter`, a cursor over the table's slots[^cursor] |
 | `coalton/vector:sort-by!` | `vector-sort-by!`, an insertion sort[^sort] |
+| `coalton/char:code-char`, `ascii-alpha?`, `ascii-digit?`, `ascii-uppercase?`, `ascii-lowercase?`, `digit->ufix` | `char-code-char`, `char-ascii-alpha?` and the rest, over `char-code` |
+| `Semigroup String` `<>` | `string-append`, a call of `concat` |
 
 ## Where an array is built
 
@@ -92,8 +95,9 @@ stack when it grows.
 
 - A `HashTable` key other than `UFix` is a lowering error:
   [#20](https://github.com/takeiteasy/sheaf/issues/20).
-- Other standard library functions that hold raw Lisp, such as those of `String`
-  and `Char`, are errors: [#22](https://github.com/takeiteasy/sheaf/issues/22),
+- Other standard library functions that hold raw Lisp, such as `String` `split`
+  and `Char` `upcase`, are errors:
+  [#50](https://github.com/takeiteasy/sheaf/issues/50),
   [#48](https://github.com/takeiteasy/sheaf/issues/48).
 
 [^capacity]: Capacity is a hint. A `Vector` has no capacity of its own, so `capacity`

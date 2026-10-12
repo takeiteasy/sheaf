@@ -15,7 +15,8 @@
     (sheaf/prelude:ref :view)
     (coalton/cell:cell :storage :fixed)
     (coalton/vector:vector :storage :resizable)
-    (coalton/hashtable:hashtable :storage :resizable))
+    (coalton/hashtable:hashtable :storage :resizable)
+    (coalton:string :storage :variable))
   "The prelude's types: the kind of each, and for storage its size class.")
 
 (defparameter *prelude-ops*
@@ -33,7 +34,10 @@
     (:vector-resect 3) (:vector-reverse 1) (:list-reverse 1)
     (:hashtable-next-slot 2) (:hashtable-slot-key 2) (:hashtable-slot-value 2)
     (:elements-length 1) (:elements-index 2) (:elements-set 3)
-    (:elements-ref 2) (:elements-slice 3))
+    (:elements-ref 2) (:elements-slice 3)
+    (:string-length 1) (:string-concat 2 :allocates) (:string-substring 3 :allocates) (:string-ref 2)
+    (:string-eq 2) (:string-compare 2) (:integer-to-string 1 :allocates)
+    (:char-code 1) (:code-char 1))
   "The operations of the prelude: the arity of each, and whether it allocates.")
 
 (defparameter *prelude-functions*
@@ -73,7 +77,13 @@
     (coalton/hashtable:get . :hashtable-get)
     (coalton/hashtable:set! . :hashtable-set)
     (coalton/hashtable:remove! . :hashtable-remove)
-    (coalton/hashtable:count . :hashtable-count)))
+    (coalton/hashtable:count . :hashtable-count)
+    (coalton/string:length . :string-length)
+    (coalton/string:concat . :string-concat)
+    (coalton/string:substring . :string-substring)
+    (coalton/string:ref-unchecked . :string-ref)
+    (coalton/char:char-code . :char-code)
+    (coalton/char::code-char-unchecked . :code-char)))
 
 (defparameter *prelude-classes*
   '((sheaf/prelude/fixed:extent :fixed-new)
@@ -81,6 +91,12 @@
     (sheaf/prelude/arr:viewable :elements-ref :elements-slice))
   "The classes whose instance methods are primitives, and the operation of each
 method in the order the class declares them.")
+
+(defparameter *string-instances*
+  '((coalton/classes:eq :string-eq)
+    (coalton/classes:ord :string-compare))
+  "The classes whose instances for `String` have a primitive method, and the
+operation of the first method of each.")
 
 (defvar *prelude-primitives* (make-hash-table :test 'eq)
   "The prelude's operations by origin, for the program being lowered.")
@@ -90,6 +106,11 @@ method in the order the class declares them.")
   (let ((head (first (tc:flatten-type
                       (first (tc:ty-predicate-types (tc:ty-class-instance-predicate instance)))))))
     (and (tc:tycon-p head) (assoc (tc:tycon-name head) *prelude-types*) t)))
+
+(defun type-name (type)
+  "The name of the type constructor of TYPE, or NIL."
+  (let ((head (first (tc:flatten-type type))))
+    (and (tc:tycon-p head) (tc:tycon-name head))))
 
 (defun prelude-primitives ()
   (let ((table (make-hash-table :test 'eq)))
@@ -101,4 +122,13 @@ method in the order the class declares them.")
                   (loop :for symbol :in (tc:ty-class-instance-method-codegen-syms instance)
                         :for op :in ops
                         :do (setf (gethash symbol table) op)))))
+    (loop :for (class op) :in *string-instances*
+          :do (dolist (instance (tc:lookup-class-instances entry:*global-environment* class :no-error t))
+                (when (equal (mapcar #'type-name (tc:ty-predicate-types (tc:ty-class-instance-predicate instance)))
+                             '(coalton:string))
+                  (setf (gethash (first (tc:ty-class-instance-method-codegen-syms instance)) table) op))))
+    (dolist (instance (tc:lookup-class-instances entry:*global-environment* 'coalton/classes:into :no-error t))
+      (destructuring-bind (from to) (mapcar #'type-name (tc:ty-predicate-types (tc:ty-class-instance-predicate instance)))
+        (when (and (eq to 'coalton:string) (member (numeric-kind from) '(:wrap :trap)))
+          (setf (gethash (first (tc:ty-class-instance-method-codegen-syms instance)) table) :integer-to-string))))
     table))

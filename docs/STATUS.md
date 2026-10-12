@@ -13,6 +13,7 @@ What runs today, checked by `make test` ([TESTING.md](TESTING.md)).
 | Lowering | Lower a defunctionalized program to Sheaf's IR, check it and run it on a reference interpreter |
 | Numbers | Arithmetic, equality and ordering of the integer and float types, with wrapping and trapping overflow, in the interpreter and in C ([NUMBERS.md](NUMBERS.md)) |
 | Prelude | Arrays, slices, references, `Cell`, `Vector` and `Hashtable` that lower, run and get stacks, with the standard library functions written in Coalton, such as `cell:update!`, or replaced by Coalton in `sheaf/prelude`, such as `fold` and `keys`; `fixed:define-length` declares fixed lengths ([PRELUDE.md](PRELUDE.md)) |
+| Strings | `Char` and `String`, as UTF-8 bytes on the data stacks, with literals, comparison, `length`, `ref`, `substring` and `concat`, in the interpreter and in C ([STRINGS.md](STRINGS.md)) |
 | Exceptions | `throw`, `catch` and `protect` in the interpreter and in C, with the stacks of unwound calls given back ([EXCEPTIONS.md](EXCEPTIONS.md)) |
 | Root checking | Reject a store of an array, slice or reference into storage that outlives what it points into, naming both places ([ROOTS.md](ROOTS.md)) |
 | Stack assignment | Assign data stacks to a lowered program and run it on simulated stacks that check each stack's owner |
@@ -21,6 +22,6 @@ What runs today, checked by `make test` ([TESTING.md](TESTING.md)).
 
 ## Does not run yet
 
-Only numbers and the data types built from them reach C. Each stage's limitations
+Only numbers, characters, strings and the data types built from them reach C. Each stage's limitations
 are in [PIPELINE.md](PIPELINE.md) and the other docs' Limitations sections, and
 the [issues](https://github.com/takeiteasy/sheaf/issues) hold the work.
