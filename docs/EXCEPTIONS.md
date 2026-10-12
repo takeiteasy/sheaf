@@ -82,6 +82,8 @@ Lowering does not support the exception type HEAVY, which holds VECTOR UFIX
 
 - `handle`, `resumable` and `resume-to` are errors:
   [#24](https://github.com/takeiteasy/sheaf/issues/24).
+- A return out of a `catch` or `protect` is an error:
+  [#40](https://github.com/takeiteasy/sheaf/issues/40).
 - `_` takes every exception a program throws. Overflow, an index outside an array,
   a `match` with no branch and an exhausted stack end the program, and raw
   Lisp such as `unwrap` and `assert` is not translated

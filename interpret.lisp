@@ -70,6 +70,9 @@ that owner took it, and the cells pushed since."
 (defvar *handlers* '()
   "The catches being evaluated, innermost first, each its node, environment and tag.")
 
+(defvar *exits* '()
+  "The blocks being evaluated, innermost first, each its label and the tag a return throws to.")
+
 (defvar *iteration-marks* '()
   "What each stack and bank a call in the running def resets held when the def was
 entered, each its kind, index and mark.")
@@ -399,6 +402,14 @@ stacks and banks it saves, each with what it held on entry."
                           (match-pattern (ir-branch-pattern branch) value env)
                         (when matched
                           (return (evaluate (ir-branch-body branch) branch-env)))))))
+                 (ir-block
+                  (let ((tag (list nil)))
+                    (catch tag
+                      (let ((*exits* (acons (ir-block-label node) tag *exits*)))
+                        (evaluate (ir-block-body node) env)))))
+                 (ir-return
+                  (throw (cdr (assoc (ir-return-label node) *exits*))
+                    (evaluate (ir-return-value node) env)))
                  (ir-throw
                   (let ((value (evaluate (ir-throw-value node) env))
                         (type (ir-node-type (ir-throw-value node))))

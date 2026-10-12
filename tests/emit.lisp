@@ -96,6 +96,7 @@ and exit code."
   (is (= 29 (c-result "cells")))
   (is (= 19 (c-result "stdlib")))
   (is (= 5 (c-result "voids")))
+  (is (= 224 (c-result "returns")))
   (is (= 53 (c-result "vectors"))))
 
 (test growables-match-the-interpreter-in-c

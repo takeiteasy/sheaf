@@ -46,6 +46,8 @@
 (defstruct (ir-foreign (:include ir-node)) vars form)
 (defstruct (ir-match (:include ir-node)) scrutinee branches)
 (defstruct ir-branch pattern body)
+(defstruct (ir-block (:include ir-node)) label body)
+(defstruct (ir-return (:include ir-node)) label value)
 (defstruct (ir-throw (:include ir-node)) value)
 (defstruct (ir-catch (:include ir-node)) body branches (busy '()) (marks '()) (bank-marks '()))
 (defstruct ir-catch-branch type pattern body)
@@ -98,6 +100,8 @@ reaches, and its root."
     (ir-match (walk-ir function (ir-match-scrutinee node))
               (dolist (branch (ir-match-branches node))
                 (walk-ir function (ir-branch-body branch))))
+    (ir-block (walk-ir function (ir-block-body node)))
+    (ir-return (walk-ir function (ir-return-value node)))
     (ir-throw (walk-ir function (ir-throw-value node)))
     (ir-catch (walk-ir function (ir-catch-body node))
               (dolist (branch (ir-catch-branches node))
@@ -136,6 +140,15 @@ reaches, and its root."
     table))
 
 (defvar *specialized*)
+
+(defvar *return-targets* '()
+  "The blocks being lowered, innermost first: a name, its label and the handler depth it is at.")
+
+(defvar *exit-labels* '()
+  "The labels of the blocks the node being checked is inside.")
+
+(defvar *handler-depth* 0
+  "How many catches and protects the node being lowered is inside.")
 
 (defun primitive-of (name)
   "The operation and arity NAME is a primitive of, or NIL."
@@ -350,9 +363,24 @@ for a branch that catches every exception."
 (defun lower-catch (node)
   (when (ast:node-catch-in-place-p node)
     (lowering-error "handle: https://github.com/takeiteasy/sheaf/issues/24"))
-  (make-ir-catch :body (lower-body (ast:node-catch-expr node))
-                 :branches (mapcar #'lower-catch-branch (ast:node-catch-branches node))
-                 :type (lower-type (ast:node-type node)) :location *location*))
+  (let ((*handler-depth* (1+ *handler-depth*)))
+    (make-ir-catch :body (lower-body (ast:node-catch-expr node))
+                   :branches (mapcar #'lower-catch-branch (ast:node-catch-branches node))
+                   :type (lower-type (ast:node-type node)) :location *location*)))
+
+(defun lower-block (node)
+  (let* ((name (ast:node-block-name node))
+         (label (make-symbol (symbol-name name)))
+         (*return-targets* (acons name (cons label *handler-depth*) *return-targets*)))
+    (make-ir-block :label label :body (lower-body (ast:node-block-body node))
+                   :type (lower-type (ast:node-type node)) :location *location*)))
+
+(defun lower-return (node)
+  (destructuring-bind (label . depth) (cdr (assoc (ast:node-return-from-name node) *return-targets*))
+    (unless (= depth *handler-depth*)
+      (lowering-error "a return out of a catch or protect: https://github.com/takeiteasy/sheaf/issues/40"))
+    (make-ir-return :label label :value (to-atom (ast:node-return-from-expr node))
+                    :type (lower-type (ast:node-type node)) :location *location*)))
 
 (defun lower-simple (node)
   "The IR of NODE as an atom or one simple expression, after emitting a binding
@@ -390,9 +418,12 @@ for everything it evaluates first."
          (note-exception-type (ir-node-type value))
          (make-ir-throw :value value :type (lower-type (ast:node-type node)) :location *location*)))
       (ast:node-protect
-       (make-ir-protect :body (lower-body (ast:node-protect-expr node))
-                        :cleanup (lower-body (ast:node-protect-cleanup node))
-                        :type (lower-type (ast:node-type node)) :location *location*))
+       (let ((*handler-depth* (1+ *handler-depth*)))
+         (make-ir-protect :body (lower-body (ast:node-protect-expr node))
+                          :cleanup (lower-body (ast:node-protect-cleanup node))
+                          :type (lower-type (ast:node-type node)) :location *location*)))
+      (ast:node-block (lower-block node))
+      (ast:node-return-from (lower-return node))
       (ast:node-catch (lower-catch node))
       (ast:node-values
        (let ((nodes (ast:node-values-nodes node)))
@@ -547,7 +578,14 @@ and primitive has its arity, and every operand is an atom. Returns T."
                             (append (check-pattern (ir-catch-branch-pattern branch)) scope))))
                   (ir-protect
                    (check (ir-protect-body node) scope)
-                   (check (ir-protect-cleanup node) scope)))))
+                   (check (ir-protect-cleanup node) scope))
+                  (ir-block
+                   (let ((*exit-labels* (cons (ir-block-label node) *exit-labels*)))
+                     (check (ir-block-body node) scope)))
+                  (ir-return
+                   (unless (member (ir-return-label node) *exit-labels*)
+                     (fail "a return leaves no block"))
+                   (check-atom (ir-return-value node) scope)))))
        (check (ir-def-body def) (mapcar #'car (ir-def-params def)))))
    (lowered-defs lowered))
   t)

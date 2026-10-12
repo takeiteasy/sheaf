@@ -11,6 +11,10 @@
 (defvar *emit-def* nil "The def being emitted, for errors.")
 (defvar *releases* '() "What to give back on return, each `:stack` or `:bank`, its index and the C variable holding its mark.")
 (defvar *result-c-type*)
+(defvar *emit-exits* '()
+  "The blocks being emitted, innermost first, each its label and, unless its value
+is returned from the def, the C variable it assigns, the label after it, the
+releases in force at its start and a cell that notes the label is jumped to.")
 (defvar *tail-used*)
 (defvar *jumps* '() "Where a tail call goes: the callee's name, its label and its parameters, each a C type and name.")
 (defvar *tail-calls* '() "The calls in tail position of the def being emitted that jump.")
@@ -808,20 +812,47 @@ in the frame, which then goes on unwinding."
                         (:assign ,(var "sheaf_branch") ,(var saved-branch))
                         (:expr (:call "sheaf_unwind"))))))))))
 
+(defun emit-block (node target env)
+  "The statements that compute the block NODE into TARGET: its body, then the
+label that a return out of it jumps to."
+  (let ((label (ir-block-label node)))
+    (if (eq target :return)
+        (let ((*emit-exits* (acons label '(:return) *emit-exits*)))
+          (emit-node (ir-block-body node) :return env))
+        (let* ((end (fresh-c-name (make-symbol "END")))
+               (jumped (list nil))
+               (body (let ((*emit-exits* (acons label (list target end *releases* jumped) *emit-exits*)))
+                       (emit-node (ir-block-body node) target env))))
+          (append body (when (first jumped) `((:label ,end))))))))
+
+(defun emit-block-return (node env)
+  "The statements of the return NODE: give back what was taken since its block began, then leave it."
+  (let ((value (atom-expr (ir-return-value node) env))
+        (exit (cdr (assoc (ir-return-label node) *emit-exits*))))
+    (if (equal exit '(:return))
+        (emit-return value)
+        (destructuring-bind (target end releases jumped) exit
+          (setf (first jumped) t)
+          `((:assign ,(var target) ,value)
+            ,@(emit-releases (ldiff *releases* releases))
+            (:goto ,end))))))
+
 (defun emit-node (node target env)
   "The statements that compute NODE into TARGET, a C variable or `:return`."
   (etypecase node
     (ir-let
      (let ((name (fresh-c-name (ir-let-name node))))
        (multiple-value-bind (owned saves) (owned-marks (ir-let-stacks node) (ir-let-bank node))
-         (append
-          saves
-          `((:decl ,(c-type (ir-node-type (ir-let-value node))) ,name nil :unused t))
-          (emit-node (ir-let-value node) name env)
-          (let ((*releases* (append owned *releases*)))
-            (emit-node (ir-let-body node) target (acons (ir-let-name node) name env)))
-          (unless (eq target :return)
-            (emit-releases owned))))))
+         (let ((*releases* (append owned *releases*)))
+           (append
+            saves
+            `((:decl ,(c-type (ir-node-type (ir-let-value node))) ,name nil :unused t))
+            (emit-node (ir-let-value node) name env)
+            (emit-node (ir-let-body node) target (acons (ir-let-name node) name env))
+            (unless (eq target :return)
+              (emit-releases owned)))))))
+    (ir-block (emit-block node target env))
+    (ir-return (emit-block-return node env))
     (ir-match (emit-match node target env))
     (ir-throw (emit-throw node env))
     (ir-catch (emit-catch node target env))

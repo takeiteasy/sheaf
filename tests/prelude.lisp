@@ -67,6 +67,20 @@
     (is (= expected (sheaf:run-lowered (lowered "voids"))))
     (is (= expected (sheaf:run-lowered (assigned "voids"))))))
 
+(test an-early-return-runs-on-every-tier
+  (let ((expected (run-on-sbcl "returns")))
+    (is (= 224 expected))
+    (is (zerop (count-ir (lowered "returns") 'sheaf:ir-foreign)))
+    (is (plusp (count-ir (lowered "returns") 'sheaf:ir-return)))
+    (is (= expected (sheaf:run-lowered (lowered "returns"))))
+    (is (= expected (sheaf:run-lowered (assigned "returns"))))))
+
+(test a-return-out-of-a-catch-or-of-a-growable-value-is-an-error
+  (is (search "issues/40" (error-message (lambda () (lowered-from "returns-rejected" "MAIN-CATCH")))))
+  (is (search "issues/43" (error-message
+                           (lambda ()
+                             (sheaf:assign-stacks (lowered-from "returns-rejected" "MAIN-GROWN")))))))
+
 (test cells-give-one-result-on-every-tier
   (let ((expected (run-on-sbcl "cells")))
     (is (= 29 expected))

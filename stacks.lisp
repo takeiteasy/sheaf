@@ -112,6 +112,8 @@ pool of its own holds."
                (ir-match (some (lambda (branch) (scan (ir-branch-body branch) reaches))
                                (ir-match-branches node)))
                (ir-throw nil)
+               (ir-block (scan (ir-block-body node) reaches))
+               (ir-return nil)
                (ir-catch (or (scan (ir-catch-body node) reaches)
                              (some (lambda (branch) (scan (ir-catch-branch-body branch) reaches))
                                    (ir-catch-branches node))))
@@ -182,6 +184,8 @@ lets whose values reach the result."
                           growables (max growables branch-growables)
                           banked (or banked branch-banked))))))
     (ir-throw (values nil 0 nil))
+    (ir-block (needs (ir-block-body node) reaches reached))
+    (ir-return (values nil 0 nil))
     (ir-catch (let ((ordinary nil) (growables 0) (banked nil))
                 (dolist (body (cons (ir-catch-body node) (mapcar #'ir-catch-branch-body (ir-catch-branches node)))
                               (values ordinary growables banked))
@@ -212,7 +216,8 @@ lets whose values reach the result."
                 (tail-need (ir-let-body node))))
     (ir-match (reduce #'max (ir-match-branches node) :key (lambda (branch) (tail-need (ir-branch-body branch)))
                                                       :initial-value 0))
-    (ir-throw 0)
+    ((or ir-throw ir-return) 0)
+    (ir-block (tail-need (ir-block-body node)))
     (ir-catch (reduce #'max (cons (ir-catch-body node) (mapcar #'ir-catch-branch-body (ir-catch-branches node)))
                       :key #'tail-need))
     (ir-protect (tail-need (ir-protect-body node)))))
@@ -225,7 +230,8 @@ lets whose values reach the result."
     (ir-let (tail-banked-p (if (returns-own-name-p node) (ir-let-value node) (ir-let-body node))))
     (ir-match (some (lambda (branch) (tail-banked-p (ir-branch-body branch)))
                     (ir-match-branches node)))
-    (ir-throw nil)
+    ((or ir-throw ir-return) nil)
+    (ir-block (tail-banked-p (ir-block-body node)))
     (ir-catch (some #'tail-banked-p (cons (ir-catch-body node) (mapcar #'ir-catch-branch-body (ir-catch-branches node)))))
     (ir-protect (tail-banked-p (ir-protect-body node)))))
 
@@ -305,9 +311,10 @@ which `emit-node` can turn into jumps."
                              (walk (ir-branch-body branch) owned)))
                  (ir-catch (dolist (branch (ir-catch-branches node))
                              (walk (ir-catch-branch-body branch) owned)))
+                 (ir-block (walk (ir-block-body node) owned))
                  (ir-call (unless (or owned (ir-call-region node))
                             (push node calls)))
-                 ((or ir-atom ir-prim ir-construct ir-foreign ir-throw ir-protect)))))
+                 ((or ir-atom ir-prim ir-construct ir-foreign ir-throw ir-return ir-protect)))))
       (when (eq (ir-def-kind def) :function)
         (walk (ir-def-body def) (ir-def-pool def))))
     calls))
@@ -422,7 +429,7 @@ effects from TABLE."
                (when known (merge-effects effects known)))))
       (walk-ir (lambda (node)
                  (etypecase node
-                   ((or ir-literal ir-local ir-match ir-throw ir-catch))
+                   ((or ir-literal ir-local ir-match ir-throw ir-catch ir-block ir-return))
                    (ir-global (def (ir-global-name node)))
                    (ir-foreign (setf (effects-stores effects) t))
                    (ir-construct (stacks (list (ir-construct-stack node))))
@@ -695,6 +702,14 @@ uses it."
                   (let ((copy (copy-ir-throw node)))
                     (setf (ir-throw-value copy) (rewrite-atom (ir-throw-value node)))
                     copy))
+                 (ir-block
+                  (let ((copy (copy-ir-block node)))
+                    (setf (ir-block-body copy) (rewrite (ir-block-body node) reaches busy owned supply owned-bank))
+                    copy))
+                 (ir-return
+                  (let ((copy (copy-ir-return node)))
+                    (setf (ir-return-value copy) (rewrite-atom (ir-return-value node)))
+                    copy))
                  (ir-catch
                   (let ((copy (copy-ir-catch node)))
                     (setf (ir-catch-busy copy) busy
@@ -814,6 +829,16 @@ stack below its stack count. Returns T."
      (lowered-defs lowered))
     t))
 
+(defun check-returns (lowered)
+  "Signal an error for a return out of a block of a growable value."
+  (maphash (lambda (name def)
+             (walk-ir (lambda (node)
+                        (when (and (ir-return-p node) (holds-growable-p (ir-node-type (ir-return-value node))))
+                          (error "~s returns a growable value out of a block: https://github.com/takeiteasy/sheaf/issues/43"
+                                 name)))
+                      (ir-def-body def)))
+           (lowered-defs lowered)))
+
 (defun assign-stacks (lowered)
   "LOWERED with a data stack assigned to every cell and growable value, after
 Goose's recipe (spec section 10.3). Each def is cloned for the context it is
@@ -834,6 +859,7 @@ called in, so every stack index is a constant. Returns the new program, whose
          (*global-busy* '())
          (*stack-count* 0)
          (root (gethash (lowered-root lowered) defs)))
+    (check-returns lowered)
     (find-swaps defs)
     (flet ((take-global (name)
              (let ((placement (gethash name *placements*)))

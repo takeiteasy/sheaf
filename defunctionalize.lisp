@@ -294,6 +294,8 @@ and RET shapes; a value has just RET."
     (ast:node-match (cons (ast:node-match-expr node)
                           (mapcar #'match-branch-body-of (ast:node-match-branches node))))
     (ast:node-throw (list (ast:node-throw-expr node)))
+    (ast:node-block (list (ast:node-block-body node)))
+    (ast:node-return-from (list (ast:node-return-from-expr node)))
     (ast:node-protect (list (ast:node-protect-expr node) (ast:node-protect-cleanup node)))
     (ast:node-catch
      (when (ast:node-catch-in-place-p node)
@@ -386,6 +388,9 @@ its sets are then free to differ per use."
           (values (rest copies) (first copies)))
         (values (rest shapes) (first shapes)))))
 
+(defvar *blocks* '()
+  "The shape each enclosing block returns, by name.")
+
 (defvar *collected* '()
   "The shapes inferred for the binding being analyzed.")
 
@@ -435,6 +440,15 @@ its sets are then free to differ per use."
     (ast:node-match (infer-match node env))
     (ast:node-throw
      (infer (ast:node-throw-expr node) env)
+     (shape-of (ast:node-type node)))
+    (ast:node-block
+     (let* ((shape (shape-of (ast:node-type node)))
+            (*blocks* (acons (ast:node-block-name node) shape *blocks*)))
+       (unify-shapes shape (infer (ast:node-block-body node) env))
+       shape))
+    (ast:node-return-from
+     (unify-shapes (cdr (assoc (ast:node-return-from-name node) *blocks*))
+                   (infer (ast:node-return-from-expr node) env))
      (shape-of (ast:node-type node)))
     (ast:node-protect
      (infer (ast:node-protect-cleanup node) env)
@@ -1386,6 +1400,14 @@ FN is evaluated before ARGS, as in the call it replaces."
       (ast:node-throw
        (ast:make-node-throw :type (funcall ty) :location location
                             :expr (rewrite (ast:node-throw-expr node))))
+      (ast:node-block
+       (ast:make-node-block :type (funcall ty) :location location
+                            :name (ast:node-block-name node)
+                            :body (rewrite (ast:node-block-body node))))
+      (ast:node-return-from
+       (ast:make-node-return-from :type (funcall ty) :location location
+                                  :name (ast:node-return-from-name node)
+                                  :expr (rewrite (ast:node-return-from-expr node))))
       (ast:node-protect
        (ast:make-node-protect :type (funcall ty) :location location
                               :expr (rewrite (ast:node-protect-expr node))
