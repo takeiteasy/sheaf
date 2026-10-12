@@ -86,7 +86,7 @@
                           (eq :data (sheaf:ir-type-kind type))))))
 
 (test raw-lisp-stays-opaque
-  (let ((lowered (lowered "counter")))
+  (let ((lowered (lowered-from "panics-rejected" "MAIN-RAW")))
     (is (plusp (count-ir lowered 'sheaf:ir-foreign)))
     (signals error (sheaf:run-lowered lowered))))
 

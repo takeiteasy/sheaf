@@ -52,7 +52,7 @@ and one of its functions assigns the program that function is the root of."
   (is (= 47 (sheaf:run-lowered (assigned "stacks")))))
 
 (test raw-lisp-still-cannot-run-when-assigned
-  (signals error (sheaf:run-lowered (assigned "counter"))))
+  (signals error (sheaf:run-lowered (assigned (list "panics-rejected" "MAIN-RAW")))))
 
 (test programs-without-lists-need-no-stacks
   (is (= 0 (sheaf:lowered-stack-count (assigned "closures")))))

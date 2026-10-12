@@ -57,6 +57,7 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `vectors.lisp` | Vectors built locally and returned, and every operation on them |
 | `escape.lisp` | A function passed to raw Lisp, which defunctionalization rejects |
 | `exceptions.lisp` | Every kind of `catch` branch, nesting, rethrow and `protect` on both exits, on SBCL, the interpreter and in C |
+| `panic-messages.lisp` | Panics whose messages are built at run time: `error` of a built string, `assert` with arguments of each printable type, `unwrap` and `expect`, caught and not, on SBCL, the interpreter and in C |
 | `exceptions-stacks.lisp` | Throws that unwind cells and banked vectors, and guarded bodies that build their result in a stack in use, in loops that exhaust their stacks if unwinding leaks |
 | `exceptions-rejected.lisp` | Exceptions that hold storage, and `handle` and `resumable`, which are errors |
 

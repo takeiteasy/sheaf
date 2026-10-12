@@ -80,19 +80,45 @@ Lowering does not support the exception type HEAVY, which holds VECTOR UFIX
 
 ## Panics
 
-`assert`, `unreachable` and `error` with a string literal run on every tier. A
+`assert`, `unreachable`, `error`, `unwrap` and `expect` run on every tier. A
 panic unwinds like a throw: `protect` cleanups run and `catch` with `_` takes
 it, and no typed branch does. Unhandled, it prints its message to standard error
 and exits with status 1.
 
+```lisp
+(assert (> n 5) "n is ~a" n)   ; Assertion (> N 5) failed: n is 3
+(unwrap (the (Optional UFix) None))   ; Unexpected #.NONE in UNWRAP
+```
+
 | Coalton | Lowers to |
 |---|---|
-| `(assert d)` | A `match` on `d` whose `False` branch is an `ir-panic` of `Assertion <d> failed: ` |
+| `(assert d)` | A `match` on `d` whose `False` branch is an `ir-panic` of `Assertion <d> failed: `[^text] |
+| `(assert d "control" args…)` | The same, with the message followed by the formatted arguments |
 | `(unreachable)` | An `ir-panic` of `Unreachable` |
-| `(error "text")` | An `ir-panic` of `text` |
+| `(error text)` | An `ir-panic` of the `String` `text`, a literal or any other string |
+| `(expect text x)` | `error` of `text` when `x` has no value |
+| `(unwrap x)` | An `ir-panic` of `Unexpected <x> in UNWRAP` |
+
+The message is a `String` ([STRINGS.md](STRINGS.md)) built before the panic, so
+it lives on the data stacks like any other.
+
+## Message formatting
+
+An `assert` control string and the text of `unwrap` use `~a`, `~d`, `~s`, `~%`
+and `~~`; any other directive leaves the raw Lisp as `ir-foreign`.
+
+| Value | Prints as |
+|---|---|
+| An integer type | Its decimal digits |
+| `F32`, `F64` | As C's `%g`: six significant digits[^floats] |
+| `Boolean` | `T` or `NIL` |
+| `Char` | The character; `~s` gives `#\x` |
+| `String` | The text; `~s` gives it in quotes, unescaped |
+| A data type | `#.NAME`, or `#.(NAME field …)` with each field printed the same way |
+| Any other type | `#<NAME>` |
 
 Any other raw Lisp stays `ir-foreign`. The interpreter rejects it and the C
-emitter rejects it with the offset of the raw Lisp itself[^text].
+emitter rejects it with the offset of the raw Lisp itself.
 
 ## Limitations
 
@@ -103,9 +129,6 @@ emitter rejects it with the offset of the raw Lisp itself[^text].
 - `_` takes every exception a program throws and every panic. Overflow, an index
   outside an array, a `match` with no branch and an exhausted stack end the
   program.
-- An `assert` with format arguments, an `error` whose message is not a string
-  literal, and `unwrap` and `expect` are raw Lisp:
-  [#48](https://github.com/takeiteasy/sheaf/issues/48).
 - A handler whose guarded expression stores a value that holds storage keeps
   the cells it built in a stack in use:
   [#27](https://github.com/takeiteasy/sheaf/issues/27).
@@ -121,5 +144,8 @@ emitter rejects it with the offset of the raw Lisp itself[^text].
     handler gives them back only if its guarded expression, a cleanup in it and
     every def they call store no value that holds storage and run no raw Lisp,
     since a stored value could outlive the unwind.
-[^text]: The text of an `assert` is built when it is lowered, with the datum
-    printed with package prefixes, so it can differ from the text SBCL prints.
+[^floats]: SBCL prints `1.5d0` for an `F64` and `1.0d7` where `%g` gives `1.5` and
+    `1e+07`, and prefixes a constructor from another package. The interpreter
+    and C always agree.
+[^text]: The datum of an `assert` is printed when it is lowered, with package
+    prefixes, so it can differ from the text SBCL prints.

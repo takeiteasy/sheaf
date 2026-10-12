@@ -57,6 +57,38 @@ that owner took it, and the cells pushed since."
   "The Lisp string the UTF-8 BYTES hold."
   (sb-ext:octets-to-string (coerce bytes '(vector (unsigned-byte 8))) :external-format :utf-8))
 
+(defun decimal-exponent (exact)
+  "The exponent E of the positive rational EXACT in 10^E <= EXACT < 10^(E+1)."
+  (let ((exponent (floor (log (float exact 1d0) 10))))
+    (loop :while (>= exact (expt 10 (1+ exponent))) :do (incf exponent))
+    (loop :while (< exact (expt 10 exponent)) :do (decf exponent))
+    exponent))
+
+(defun float-g-text (value)
+  "VALUE, a float, as C's `%g` prints a double: six significant digits, in scientific
+notation when the exponent is below -4 or at least 6."
+  (cond ((float-features:float-nan-p value) "nan")
+        ((float-features:float-infinity-p value) (if (plusp value) "inf" "-inf"))
+        ((zerop value) (if (minusp (float-sign value)) "-0" "0"))
+        (t (let* ((exact (abs (rational value)))
+                  (exponent (decimal-exponent exact))
+                  (digits (round (* exact (expt 10 (- 5 exponent))))))
+             (when (= digits 1000000)
+               (setf digits 100000)
+               (incf exponent))
+             (let ((text (string-right-trim "0" (princ-to-string digits)))
+                   (sign (if (minusp value) "-" "")))
+               (cond ((or (< exponent -4) (>= exponent 6))
+                      (format nil "~a~a~@[.~a~]e~a~2,'0d" sign (char text 0)
+                              (and (> (length text) 1) (subseq text 1))
+                              (if (minusp exponent) "-" "+") (abs exponent)))
+                     ((minusp exponent)
+                      (format nil "~a0.~a~a" sign (make-string (- -1 exponent) :initial-element #\0) text))
+                     ((>= exponent (1- (length text)))
+                      (format nil "~a~a~a" sign text
+                              (make-string (- exponent (1- (length text))) :initial-element #\0)))
+                     (t (format nil "~a~a.~a" sign (subseq text 0 (1+ exponent)) (subseq text (1+ exponent))))))))))
+
 (defun match-pattern (pattern value env)
   "Whether VALUE matches PATTERN, and ENV extended with the variables it binds."
   (etypecase pattern
@@ -426,6 +458,8 @@ stacks and banks it saves, each with what it held on entry."
                                          ((< (aref a i) (aref b i)) "LT")
                                          (t "GT"))))))
                      (:integer-to-string (new-string (format nil "~d" (first args))))
+                     (:float-to-string (new-string (float-g-text (first args))))
+                     (:char-to-string (new-string (string (code-char (first args)))))
                      (:char-code (first args))
                      (:code-char
                       (unless (< (first args) #x110000)
@@ -560,11 +594,12 @@ stacks and banks it saves, each with what it held on entry."
                                       (and location (source:span-start (source:location-span location))))
                                     (ir-foreign-form node)))
                  (ir-panic
-                  (loop :for (handler catch-env tag) :in *handlers*
-                        :do (dolist (branch (ir-catch-branches handler))
-                              (unless (ir-catch-branch-type branch)
-                                (throw tag (list branch catch-env)))))
-                  (error 'panic :message (ir-panic-message node)))
+                  (let ((message (bytes-string (datum-fields (evaluate (ir-panic-message node) env)))))
+                    (loop :for (handler catch-env tag) :in *handlers*
+                          :do (dolist (branch (ir-catch-branches handler))
+                                (unless (ir-catch-branch-type branch)
+                                  (throw tag (list branch catch-env)))))
+                    (error 'panic :message message)))
                  (ir-match
                   (let ((value (live (evaluate (ir-match-scrutinee node) env) "A match read")))
                     (dolist (branch (ir-match-branches node) (error "No branch matches ~s" value))

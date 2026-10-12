@@ -9,7 +9,7 @@
 (coalton-toplevel
   (declare main-format (Void -> UFix))
   (define (main-format)
-    (assert (> (the UFix 1) 2) "one is ~a" 1)
+    (assert (> (the UFix 1) 2) "one is ~5d" 1)
     5)
 
   (declare main-raw (Void -> UFix))

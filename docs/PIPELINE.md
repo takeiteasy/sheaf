@@ -51,9 +51,8 @@ does.
 - Standard library functions whose source holds raw Lisp stay raw Lisp unless the
   prelude replaces them ([PRELUDE.md](PRELUDE.md#replacements)):
   [#50](https://github.com/takeiteasy/sheaf/issues/50).
-- Raw Lisp in user code other than `assert`, `unreachable` and `error` with a
-  string literal stays raw Lisp ([EXCEPTIONS.md](EXCEPTIONS.md#panics)):
-  [#48](https://github.com/takeiteasy/sheaf/issues/48).
+- Raw Lisp in user code other than a panic or a `format` to a string stays raw
+  Lisp ([EXCEPTIONS.md](EXCEPTIONS.md#panics)).
 - The SBCL path does not run Sheaf's checks yet:
   [#8](https://github.com/takeiteasy/sheaf/issues/8).
 - `handle`, `resumable` and `resume-to` are errors: [#24](https://github.com/takeiteasy/sheaf/issues/24).

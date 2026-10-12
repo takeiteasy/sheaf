@@ -36,13 +36,17 @@
     (is (= expected (sheaf:run-lowered (assigned "arrays"))))))
 
 (defun prelude-ops-used (&rest fixtures)
-  "The prelude operations the fixtures' mains, and the hashtables' COUNTED, use."
+  "The prelude operations the fixtures' mains use, the hashtables' COUNTED, and two roots of panic-messages."
   (sort (remove-duplicates
          (loop :for fixture :in fixtures
                :append (mapcar #'sheaf:ir-prim-op (prims-with-prelude-ops (lowered fixture)))
                :when (string= fixture "hashtables")
                  :append (mapcar #'sheaf:ir-prim-op
-                                 (prims-with-prelude-ops (lowered-from fixture "COUNTED")))))
+                                 (prims-with-prelude-ops (lowered-from fixture "COUNTED")))
+               :when (string= fixture "panic-messages")
+                 :append (loop :for root :in '("ASSERT-FLOATS" "ASSERT-SHAPES")
+                               :append (mapcar #'sheaf:ir-prim-op
+                                               (prims-with-prelude-ops (lowered-from fixture root))))))
         #'string<))
 
 (test arrays-lower-to-primitives
@@ -51,7 +55,7 @@
   (is (zerop (count-ir (lowered "vectors") 'sheaf:ir-foreign)))
   (is (zerop (count-ir (lowered "hashtables") 'sheaf:ir-foreign)))
   (is (equal (sort (mapcar #'first sheaf::*prelude-ops*) #'string<)
-             (prelude-ops-used "arrays" "cells" "vectors" "hashtables" "vector-library" "lists" "table-iterators" "strings"))))
+             (prelude-ops-used "arrays" "cells" "vectors" "hashtables" "vector-library" "lists" "table-iterators" "strings" "panic-messages"))))
 
 (test standard-library-functions-run-on-every-tier
   (let ((expected (run-on-sbcl "stdlib")))

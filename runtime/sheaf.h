@@ -222,6 +222,35 @@ static SHEAF_UNUSED uint64_t sheaf_unsigned_text(uint8_t *out, uint64_t v) {
     return (uint64_t)snprintf((char *)out, 24, "%llu", (unsigned long long)v);
 }
 
+/* Write the text of V as `%g` prints it to OUT, which holds 32 bytes. */
+static SHEAF_UNUSED uint64_t sheaf_float_text(uint8_t *out, double v) {
+    return (uint64_t)snprintf((char *)out, 32, "%g", v);
+}
+
+/* Write C as UTF-8 to OUT, which holds 4 bytes. Returns the count. */
+static SHEAF_UNUSED uint64_t sheaf_char_text(uint8_t *out, uint32_t c) {
+    if (c < 0x80) {
+        out[0] = (uint8_t)c;
+        return 1;
+    }
+    if (c < 0x800) {
+        out[0] = (uint8_t)(0xC0 | (c >> 6));
+        out[1] = (uint8_t)(0x80 | (c & 0x3F));
+        return 2;
+    }
+    if (c < 0x10000) {
+        out[0] = (uint8_t)(0xE0 | (c >> 12));
+        out[1] = (uint8_t)(0x80 | ((c >> 6) & 0x3F));
+        out[2] = (uint8_t)(0x80 | (c & 0x3F));
+        return 3;
+    }
+    out[0] = (uint8_t)(0xF0 | (c >> 18));
+    out[1] = (uint8_t)(0x80 | ((c >> 12) & 0x3F));
+    out[2] = (uint8_t)(0x80 | ((c >> 6) & 0x3F));
+    out[3] = (uint8_t)(0x80 | (c & 0x3F));
+    return 4;
+}
+
 static SHEAF_UNUSED void sheaf_range(uint64_t lo, uint64_t hi, uint64_t length) {
     if (lo > hi || hi > length) {
         fprintf(stderr, "the range %llu to %llu is outside the array of %llu elements\n",
@@ -459,9 +488,9 @@ static SHEAF_UNUSED SHEAF_NORETURN void sheaf_throw(int type, const char *name) 
 /* A panic is taken only by a catch of `_`. */
 #define SHEAF_PANIC (-2)
 
-static SHEAF_UNUSED SHEAF_NORETURN void sheaf_panic(const char *message) {
+static SHEAF_UNUSED SHEAF_NORETURN void sheaf_panic(const uint8_t *message, uint64_t length) {
     sheaf_raise(SHEAF_PANIC);
-    fprintf(stderr, "%s\n", message);
+    fprintf(stderr, "%.*s\n", (int)length, (const char *)message);
     exit(1);
 }
 

@@ -40,7 +40,7 @@ bound by a `let` in evaluation order, left to right.
 | `ir-foreign` | Raw Lisp and the locals it reads[^foreign] |
 | `ir-match` | An atom and branches; a branch holds a pattern and a body |
 | `ir-throw` | An atom, an exception to throw ([EXCEPTIONS.md](EXCEPTIONS.md)) |
-| `ir-panic` | A message; unwinds to a `catch` of `_` ([EXCEPTIONS.md](EXCEPTIONS.md#panics)) |
+| `ir-panic` | A `String` message atom; unwinds to a `catch` of `_` ([EXCEPTIONS.md](EXCEPTIONS.md#panics)) |
 | `ir-catch` | A body and branches; a branch holds an exception type and pattern, or neither, and a body |
 | `ir-protect` | A body and a cleanup |
 | `ir-loop` | Variables with initial atoms and steps, a test and which value of it exits, a body run for its effects, and a result |
@@ -85,8 +85,8 @@ well. An allocating one holds the stack it pushes to in `ir-prim-stack`.
 
 ## Limitations
 
-- Raw Lisp that is not a known panic stays `ir-foreign`, which `run-lowered` and
-  the emitter reject: [#48](https://github.com/takeiteasy/sheaf/issues/48).
+- Raw Lisp that is not a known panic or a `format` to a string stays `ir-foreign`,
+  which `run-lowered` and the emitter reject.
 - `Integral`, `Reciprocable`, `Bits` and `Bit` are not primitives:
   [#21](https://github.com/takeiteasy/sheaf/issues/21).
 - A recursive `let` is an error: [#10](https://github.com/takeiteasy/sheaf/issues/10).

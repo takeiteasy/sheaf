@@ -121,8 +121,7 @@ A slice past either limit prints `bank space exhausted` or `a bank slice exhaust
 
 - `handle`, `resumable` and `resume-to`:
   [#24](https://github.com/takeiteasy/sheaf/issues/24).
-- Raw Lisp that is not a known panic is an error naming its offset:
-  [#48](https://github.com/takeiteasy/sheaf/issues/48).
+- Raw Lisp that is not a known panic is an error naming its offset.
 - A scalar type that is not a number or a `Char`, such as `Symbol`, is an error.
 - `Integer` is 64 bits: [#19](https://github.com/takeiteasy/sheaf/issues/19).
 - Cells are linked by pointers, not relative references:

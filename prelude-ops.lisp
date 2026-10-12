@@ -37,6 +37,7 @@
     (:elements-ref 2) (:elements-slice 3)
     (:string-length 1) (:string-concat 2 :allocates) (:string-substring 3 :allocates) (:string-ref 2)
     (:string-eq 2) (:string-compare 2) (:integer-to-string 1 :allocates)
+    (:float-to-string 1 :allocates) (:char-to-string 1 :allocates)
     (:char-code 1) (:code-char 1))
   "The operations of the prelude: the arity of each, and whether it allocates.")
 

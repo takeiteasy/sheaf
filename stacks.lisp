@@ -725,8 +725,12 @@ uses it."
                                 (and bank (list bank)))))))
              (rewrite (node reaches busy owned supply owned-bank)
                (etypecase node
-                 ((or ir-literal ir-local ir-foreign ir-panic) node)
+                 ((or ir-literal ir-local ir-foreign) node)
                  (ir-global (rewrite-atom node))
+                 (ir-panic
+                  (let ((copy (copy-ir-panic node)))
+                    (setf (ir-panic-message copy) (rewrite-atom (ir-panic-message node)))
+                    copy))
                  (ir-let
                   (let* ((value (ir-let-value node))
                          (reaches-value (gethash (ir-let-name node) reached))

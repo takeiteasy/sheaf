@@ -96,7 +96,7 @@ and exit code."
            sheaf::*prelude-emitters*))
 
 (test raw-lisp-is-not-emitted
-  (signals error (sheaf:emit-c (assigned "counter"))))
+  (signals error (sheaf:emit-c (assigned (list "panics-rejected" "MAIN-RAW")))))
 
 (defun c-result-from (fixture root)
   "The result of the C program for the function ROOT of FIXTURE, and the interpreter's."

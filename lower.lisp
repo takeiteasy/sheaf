@@ -44,7 +44,7 @@
 (defstruct (ir-construct (:include ir-node)) constructor args (stack nil))
 (defstruct (ir-prim (:include ir-node)) op args (stack nil) (bank nil))
 (defstruct (ir-foreign (:include ir-node)) vars form)
-(defstruct (ir-panic (:include ir-node)) message)
+(defstruct (ir-panic (:include ir-node)) message)  ; a `String` atom
 (defstruct (ir-match (:include ir-node)) scrutinee branches)
 (defstruct ir-branch pattern body)
 (defstruct (ir-block (:include ir-node)) label body)
@@ -92,7 +92,8 @@ reaches, and its root."
   "Call FUNCTION on NODE and on every node inside it, outermost first."
   (funcall function node)
   (etypecase node
-    ((or ir-literal ir-local ir-global ir-foreign ir-panic ir-break ir-continue))
+    ((or ir-literal ir-local ir-global ir-foreign ir-break ir-continue))
+    (ir-panic (walk-ir function (ir-panic-message node)))
     (ir-let (walk-ir function (ir-let-value node))
             (walk-ir function (ir-let-body node)))
     ((or ir-call ir-construct ir-prim)
@@ -261,7 +262,11 @@ reaches, and its root."
                                       constructor tag
                                       (mapcar #'lower-type (instance-fields constructor type)))))))))
 
+(defvar *local-types* nil "The type of each local of the def being lowered, by name.")
+
 (defun emit (name value)
+  (when *local-types*
+    (setf (gethash name *local-types*) (ir-node-type value)))
   (push (list name value) *bindings*))
 
 (defun wrap-bindings (tail)
@@ -305,17 +310,14 @@ reaches, and its root."
     (numeric-overflow ()
       (lowering-error "the literal ~d, which does not fit ~a" value (symbol-name name)))))
 
-(defun literal-panic (name rands type)
-  "An `ir-panic` for a call of `error` NAME whose one argument in RANDS is a string literal, or NIL."
-  (let ((rand (first rands)))
-    (and (eq (or (specialized-origin *specialized* name) name) 'coalton/classes:error)
-         (null (rest rands))
-         (typep rand 'ast:node-literal)
-         (stringp (ast:node-literal-value rand))
-         (make-ir-panic :message (ast:node-literal-value rand) :type (lower-type type) :location *location*))))
+(defun error-panic (name rands type)
+  "An `ir-panic` for a call of `error` NAME whose one argument is in RANDS, or NIL."
+  (and (eq (or (specialized-origin *specialized* name) name) 'coalton/classes:error)
+       (null (rest rands))
+       (make-ir-panic :message (to-atom (first rands)) :type (lower-type type) :location *location*)))
 
 (defun lower-call (name rands type)
-  (or (literal-panic name rands type)
+  (or (error-panic name rands type)
       (lower-plain-call name rands type)))
 
 (defun lower-plain-call (name rands type)
@@ -347,13 +349,20 @@ reaches, and its root."
             (emit name (lower-simple value)))
   (lower-simple (ast:node-let-subexpr node)))
 
+(defun note-local-type (name type)
+  (when *local-types*
+    (setf (gethash name *local-types*) type)))
+
 (defun lower-pattern (pattern)
   (let ((type (lower-type (pattern:pattern-type pattern))))
     (etypecase pattern
-      (pattern:pattern-var (make-ir-pvar :name (pattern:pattern-var-name pattern) :type type))
+      (pattern:pattern-var
+       (note-local-type (pattern:pattern-var-name pattern) type)
+       (make-ir-pvar :name (pattern:pattern-var-name pattern) :type type))
       (pattern:pattern-wildcard (make-ir-pwild :type type))
       (pattern:pattern-literal (make-ir-plit :value (pattern:pattern-literal-value pattern) :type type))
       (pattern:pattern-binding
+       (note-local-type (pattern:pattern-var-name (pattern:pattern-binding-var pattern)) type)
        (make-ir-pas :name (pattern:pattern-var-name (pattern:pattern-binding-var pattern))
                     :pattern (lower-pattern (pattern:pattern-binding-pattern pattern))
                     :type type))
@@ -409,16 +418,118 @@ for a branch that catches every exception."
        (null (nthcdr 4 form))
        (fourth form)))
 
-(defun constant-message (form)
-  "The text of FORM, a string or a `format` of a control string alone, or NIL."
+(defun string-type ()
+  (lower-type tc:*string-type*))
+
+(defun string-node (text)
+  (make-ir-literal :value text :type (string-type) :location *location*))
+
+(defun bind-node (node)
+  "A local holding NODE, which is bound first."
+  (let ((name (make-symbol "T")))
+    (emit name node)
+    (make-ir-local :name name :type (ir-node-type node) :location *location*)))
+
+(defun join-strings (atoms)
+  "The concatenation of the `String` atoms ATOMS, as an atom."
+  (if atoms
+      (reduce (lambda (a b)
+                (bind-node (make-ir-prim :op :string-concat :args (list a b) :type (string-type)
+                                         :location *location*)))
+              atoms)
+      (string-node "")))
+
+(defvar *printers* nil "The def that prints each data type, by type, for the program being lowered.")
+(defvar *print-queue* '() "The printers asked for and not yet built, each its name and type.")
+
+(defun printer-for (type)
+  "The name of the def that prints the data TYPE."
+  (or (gethash type *printers*)
+      (let ((name (make-symbol (format nil "PRINT<~a>" (type-text type)))))
+        (setf (gethash type *printers*) name)
+        (push (cons name type) *print-queue*)
+        name)))
+
+(defun print-atom (atom directive)
+  "A `String` atom for ATOM as the format directive DIRECTIVE, `#\\a` or `#\\s`, prints it."
+  (let* ((type (ir-node-type atom))
+         (name (ir-type-name type))
+         (quoted (char= directive #\s)))
+    (flet ((primitive (op)
+             (bind-node (make-ir-prim :op op :args (list atom) :type (string-type) :location *location*))))
+      (cond ((eq name 'coalton:string)
+             (if quoted (join-strings (list (string-node "\"") atom (string-node "\""))) atom))
+            ((eq name 'coalton:char)
+             (let ((text (primitive :char-to-string)))
+               (if quoted (join-strings (list (string-node "#\\") text)) text)))
+            ((member (numeric-kind name) '(:wrap :trap)) (primitive :integer-to-string))
+            ((eq (numeric-kind name) :float) (primitive :float-to-string))
+            ((eq (ir-type-kind type) :data)
+             (bind-node (make-ir-call :function (printer-for type) :args (list atom) :type (string-type)
+                                      :location *location*)))
+            (t (string-node (format nil "#<~a>" (symbol-name name))))))))
+
+(defun format-parts (control)
+  "The strings and directives of the format CONTROL as a list of strings and the
+characters `a` and `s`, or `:unsupported` for a directive other than `~a`, `~d`,
+`~s`, `~%` and `~~`."
+  (let ((parts '())
+        (text (make-string-output-stream))
+        (i 0))
+    (flet ((flush ()
+             (let ((string (get-output-stream-string text)))
+               (when (plusp (length string)) (push string parts)))))
+      (loop :while (< i (length control))
+            :do (let ((char (char control i)))
+                  (incf i)
+                  (if (char/= char #\~)
+                      (write-char char text)
+                      (let ((directive (and (< i (length control)) (char-downcase (char control i)))))
+                        (incf i)
+                        (case directive
+                          (#\% (write-char #\Newline text))
+                          (#\~ (write-char #\~ text))
+                          ((#\a #\d #\s) (flush) (push (if (char= directive #\s) #\s #\a) parts))
+                          (t (return-from format-parts :unsupported)))))))
+      (flush))
+    (nreverse parts)))
+
+(defun lower-format (control args)
+  "A `String` atom for the format CONTROL given the atoms ARGS, or NIL when
+CONTROL has a directive that is not supported or does not match ARGS."
+  (let ((parts (format-parts control)))
+    (when (and (listp parts) (= (count-if #'characterp parts) (length args)))
+      (join-strings (loop :for part :in parts
+                          :collect (if (stringp part)
+                                       (string-node part)
+                                       (print-atom (pop args) part)))))))
+
+(defun var-local (vars symbol)
+  "The local the raw Lisp variable SYMBOL of VARS names, or NIL if its type is not known."
+  (let* ((name (cdr (assoc symbol vars)))
+         (type (and name (gethash name *local-types*))))
+    (and type (make-ir-local :name name :type type :location *location*))))
+
+(defun message-atom (vars form)
+  "A `String` atom for FORM, a string or a `format` to nil of a control string
+and variables of VARS, or NIL."
   (typecase form
-    (string form)
-    (cons (and (eq (first form) 'format) (null (second form))
-               (stringp (third form)) (null (cdddr form))
-               (ignore-errors (format nil (third form)))))))
+    (string (string-node form))
+    (cons (and (eq (first form) 'format) (null (second form)) (stringp (third form))
+               (every #'symbolp (cdddr form))
+               (let ((args (mapcar (lambda (arg) (var-local vars arg)) (cdddr form))))
+                 (and (every #'identity args)
+                      (lower-format (third form) args)))))))
+
+(defun escape-directives (text)
+  "TEXT as format control that prints it."
+  (with-output-to-string (out)
+    (loop :for char :across text
+          :do (when (char= char #\~) (write-char #\~ out))
+              (write-char char out))))
 
 (defun lower-assert (vars form type)
-  "The `ir-match` of FORM, the raw Lisp of an `assert` without format arguments, or NIL for other raw Lisp."
+  "The `ir-match` of FORM, the raw Lisp of an `assert`, or NIL for other raw Lisp."
   (let* ((statement (first form))
          (datum-var (and (consp statement) (second statement)))
          (message (and (null (rest form)) (consp statement) (eq (first statement) 'unless)
@@ -426,34 +537,44 @@ for a branch that catches every exception."
                        (panic-message-form (third statement)))))
     (when (and (consp message) (eq (first message) 'format) (= (length message) 6)
                (equal (third message) "Assertion ~A failed: ~?")
-               (equal (sixth message) '(list)))
-      (destructuring-bind (datum format-control arguments) (nthcdr 3 message)
-        (declare (ignore arguments))
-        (let ((boolean (lower-type tc:*boolean-type*)))
-          (flet ((branch (constructor body)
-                   (make-ir-branch :pattern (make-ir-pcon :constructor constructor :patterns '() :type boolean)
-                                   :body body)))
-            (make-ir-match
-             :scrutinee (make-ir-local :name (cdr (assoc datum-var vars)) :type boolean :location *location*)
-             :type type :location *location*
-             :branches (list (branch 'coalton:true (unit-node))
-                             (branch 'coalton:false
-                                     (make-ir-panic
-                                      :message (with-standard-io-syntax
-                                                 (format nil "Assertion ~A failed: ~?" (second datum) format-control '()))
-                                      :type type :location *location*))))))))))
+               (stringp (fifth message))
+               (consp (sixth message)) (eq (first (sixth message)) 'list)
+               (every #'symbolp (rest (sixth message))))
+      (let ((args (mapcar (lambda (arg) (var-local vars arg)) (rest (sixth message))))
+            (control (concatenate 'string
+                                  (escape-directives (with-standard-io-syntax
+                                                       (format nil "Assertion ~A failed: " (second (fourth message)))))
+                                  (fifth message)))
+            (boolean (lower-type tc:*boolean-type*)))
+        (when (every #'identity args)
+          (let* ((*bindings* '())
+                 (text (lower-format control args)))
+            (when text
+              (flet ((branch (constructor body)
+                       (make-ir-branch :pattern (make-ir-pcon :constructor constructor :patterns '() :type boolean)
+                                       :body body)))
+                (make-ir-match
+                 :scrutinee (make-ir-local :name (cdr (assoc datum-var vars)) :type boolean :location *location*)
+                 :type type :location *location*
+                 :branches (list (branch 'coalton:true (unit-node))
+                                 (branch 'coalton:false
+                                         (wrap-bindings (make-ir-panic :message text :type type
+                                                                       :location *location*)))))))))))))
 
 (defun lower-lisp (node)
-  "NODE, raw Lisp, as an `ir-panic` or the `ir-match` of an `assert` when it is
-one of those, otherwise as `ir-foreign`."
+  "NODE, raw Lisp, as an `ir-panic`, the `ir-match` of an `assert` or the text of
+a `format` when it is one of those, otherwise as `ir-foreign`."
   (let* ((vars (ast:node-lisp-vars node))
          (form (ast:node-lisp-form node))
          (type (lower-type (ast:node-type node)))
-         (message (and (null vars) (null (rest form))
-                       (constant-message (panic-message-form (first form))))))
-    (cond (message (make-ir-panic :message message :type type :location *location*))
-          ((lower-assert vars form type))
-          (t (make-ir-foreign :vars vars :form form :type type :location *location*)))))
+         (single (and (null (rest form)) (first form)))
+         (panic (and single (panic-message-form single))))
+    (or (and panic
+             (let ((message (message-atom vars panic)))
+               (and message (make-ir-panic :message message :type type :location *location*))))
+        (lower-assert vars form type)
+        (and single (not panic) (eq (ir-type-name type) 'coalton:string) (message-atom vars single))
+        (make-ir-foreign :vars vars :form form :type type :location *location*))))
 
 (defun lower-discarded (node)
   "The body that computes NODE, binds its value and gives Unit, for code run for its effects."
@@ -594,7 +715,8 @@ for everything it evaluates first."
       (ast:node-abstraction (lowering-error "a lambda below the top level")))))
 
 (defun lower-def (name node)
-  (let* ((*def* (cons name (ast:node-type node)))
+  (let* ((*local-types* (make-hash-table :test 'eq))
+         (*def* (cons name (ast:node-type node)))
          (*location* (ast:node-location node))
          (origin (specialized-origin *specialized* name)))
     (if (typep node 'ast:node-abstraction)
@@ -604,7 +726,9 @@ for everything it evaluates first."
           (make-ir-def name origin :function
                        (loop :for var :in (ast:node-abstraction-vars node)
                              :for param :in (tc:function-type-arguments type)
-                             :collect (cons var (lower-type param)))
+                             :collect (let ((param-type (lower-type param)))
+                                        (note-local-type var param-type)
+                                        (cons var param-type)))
                        (lower-type (tc:function-return-type type))
                        (lower-body (ast:node-abstraction-subexpr node))
                        *location*))
@@ -636,8 +760,7 @@ thrown value points to is freed while it unwinds."
               (check exception '()))))
 
 (defun drop-unused-errors (lowered)
-  "Remove the defs of `error` that no call refers to, since every call of one with a
-literal message is an `ir-panic`."
+  "Remove the defs of `error` that no call refers to, since every call of one is an `ir-panic`."
   (let ((used (make-hash-table :test 'eq))
         (defs (lowered-defs lowered)))
     (maphash (lambda (name def)
@@ -652,6 +775,47 @@ literal message is an `ir-panic`."
           :when (and (eq (ir-def-origin def) 'coalton/classes:error) (not (gethash name used)))
             :do (remhash name defs))))
 
+(defun printer-branch (type constructor)
+  "The branch of the printer of TYPE that prints CONSTRUCTOR as SBCL prints it, `#.(SOME 1)` or `#.NONE`."
+  (let* ((*bindings* '())
+         (fields (loop :for field :in (ir-constructor-fields constructor)
+                       :collect (make-ir-local :name (make-symbol "F") :type field)))
+         (name (symbol-name (ir-constructor-name constructor)))
+         (text (cond ((eq (ir-type-name type) 'coalton:boolean)
+                      (string-node (if (string= name "TRUE") "T" "NIL")))
+                     ((null fields) (string-node (format nil "#.~a" name)))
+                     (t (join-strings (append (list (string-node (format nil "#.(~a" name)))
+                                              (loop :for field :in fields
+                                                    :append (list (string-node " ") (print-atom field #\a)))
+                                              (list (string-node ")"))))))))
+    (make-ir-branch :pattern (make-ir-pcon :constructor (ir-constructor-name constructor)
+                                           :patterns (loop :for field :in fields
+                                                           :collect (make-ir-pvar :name (ir-local-name field)
+                                                                                  :type (ir-node-type field)))
+                                           :type type)
+                    :body (wrap-bindings text))))
+
+(defun printer-def (lowered name type)
+  "The def NAME that prints a value of the data TYPE."
+  (let ((value (make-symbol "VALUE")))
+    (make-ir-def name nil :function (list (cons value type)) (string-type)
+                 (make-ir-match :scrutinee (make-ir-local :name value :type type)
+                                :type (string-type)
+                                :branches (loop :for constructor :in (lowered-constructors lowered type)
+                                                :collect (printer-branch type constructor)))
+                 nil)))
+
+(defun build-printers (lowered)
+  "Build the type table of LOWERED and the printers lowering asked for, which
+may need more types and more printers."
+  (loop
+    (build-type-table lowered)
+    (when (null *print-queue*)
+      (return))
+    (dolist (request (shiftf *print-queue* '()))
+      (destructuring-bind (name . type) request
+        (setf (gethash name (lowered-defs lowered)) (printer-def lowered name type))))))
+
 (defun lower (specialized)
   "SPECIALIZED, a defunctionalized program, in Sheaf's IR."
   (check-defunctionalized specialized)
@@ -659,6 +823,8 @@ literal message is an `ir-panic`."
          (*specialized* specialized)
          (*ir-types* (make-hash-table :test 'equal))
          (*pending-types* '())
+         (*printers* (make-hash-table :test 'eq))
+         (*print-queue* '())
          (*exception-sites* '())
          (*prelude-primitives* (prelude-primitives))
          (*numeric-primitives* (numeric-primitives))
@@ -668,7 +834,7 @@ literal message is an `ir-panic`."
                  (setf (gethash name (lowered-defs lowered)) (lower-def name node))))
              (specialized-bindings specialized))
     (drop-unused-errors lowered)
-    (build-type-table lowered)
+    (build-printers lowered)
     (check-exception-payloads lowered)
     lowered))
 
@@ -744,7 +910,7 @@ and primitive has its arity, and every operand is an atom. Returns T."
                    (dolist (branch (ir-match-branches node))
                      (check (ir-branch-body branch)
                             (append (check-pattern (ir-branch-pattern branch)) scope))))
-                  (ir-panic)
+                  (ir-panic (check-atom (ir-panic-message node) scope))
                   (ir-throw (check-atom (ir-throw-value node) scope))
                   (ir-catch
                    (check (ir-catch-body node) scope)

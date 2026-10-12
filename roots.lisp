@@ -31,6 +31,7 @@ of its arguments and everything those reach."
     (:cell-new :allocates 0) (:vector-new :allocates) (:vector-with-capacity :allocates)
     (:vector-copy :allocates 0) (:vector-subseq :allocates 0)
     (:string-concat :allocates) (:string-substring :allocates) (:integer-to-string :allocates)
+    (:float-to-string :allocates) (:char-to-string :allocates)
     (:vector-pop-unsafe :reads 0) (:vector-reverse :reads 0) (:list-reverse :reads 0)
     (:hashtable-slot-value :reads 0)
     (:hashtable-new :allocates) (:hashtable-with-capacity :allocates)

@@ -181,3 +181,45 @@
     (let ((message (error-message (lambda () (sheaf:emit-c (assigned (list "panics-rejected" root)))))))
       (is (search "raw Lisp" message) "~a" root)
       (is (search "at offset" message) "~a" root))))
+
+(defparameter *panic-messages*
+  `(("ERROR-BUILT" "bad thing é")
+    ("ASSERT-FORMAT" "failed: n is 3 and -4, \"q\"")
+    ("ASSERT-FLOATS" "failed: 1234.5 0.001 100 1.23457e+07")
+    ("ASSERT-SHAPES" "failed: #.(SQUARE 2 3) #.BLANK T x #.(SOME #.(DISC 1))")
+    ("ASSERT-TEXT" ,(format nil "failed: 100%~% done ~~"))
+    ("UNWRAP-NONE" "Unexpected #.NONE in UNWRAP")
+    ("UNWRAP-ERR" "Unexpected #.(ERR #.(SQUARE 4 5)) in UNWRAP")
+    ("EXPECT-NONE" "no value here"))
+  "The roots of the panic-messages fixture that panic, and part of what each prints.")
+
+(defun panic-text (thunk)
+  (handler-case (progn (funcall thunk) "")
+    (sheaf:panic (condition) (princ-to-string condition))))
+
+(test a-message-built-at-run-time-is-the-same-on-every-tier
+  (loop :for (root text) :in *panic-messages*
+        :do (let ((lowered (lowered-from "panic-messages" root)))
+              (is (zerop (count-ir lowered 'sheaf:ir-foreign)) "~a" root)
+              (is (search text (panic-text (lambda () (sheaf:run-lowered lowered)))) "~a interpreted" root)
+              (is (search text (panic-text (lambda () (sheaf:run-lowered (sheaf:assign-stacks lowered)))))
+                  "~a on stacks" root)
+              (multiple-value-bind (output errors code) (run-c (sheaf:assign-stacks lowered))
+                (declare (ignore output))
+                (is (= 1 code) "~a" root)
+                (is (search text errors) "~a in C" root)))))
+
+(test a-panic-with-a-built-message-is-caught-on-every-tier
+  (let ((expected (run-on-sbcl "panic-messages")))
+    (is (= 39 expected))
+    (is (zerop (count-ir (lowered "panic-messages") 'sheaf:ir-foreign)))
+    (is (= expected (sheaf:run-lowered (lowered "panic-messages"))))
+    (is (= expected (sheaf:run-lowered (assigned "panic-messages"))))
+    (is (= expected (c-result "panic-messages")))))
+
+(test floats-print-as-c-prints-a-double
+  (loop :for (value text) :in '((0.5d0 "0.5") (-2.5d0 "-2.5") (100d0 "100") (123456d0 "123456")
+                                (1234567d0 "1.23457e+06") (0.0001d0 "0.0001") (0.00001d0 "1e-05")
+                                (1d100 "1e+100") (0.1d0 "0.1") (999999.5d0 "1e+06") (0d0 "0")
+                                (1.5f0 "1.5") (3.4028235f38 "3.40282e+38"))
+        :do (is (string= text (sheaf::float-g-text value)) "~a" value)))

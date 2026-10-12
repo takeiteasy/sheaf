@@ -652,16 +652,27 @@ Returns its C variable."
       (emit-stmt `(:expr (:call "memcpy" (:-> ,string "e") (:+ (:-> ,a "e") ,(var from)) ,(var length))))
       string)))
 
-(define-prelude-op :integer-to-string
-  (let ((digits (fresh-c-name (make-symbol "DIGITS")))
-        (length (fresh-c-name (make-symbol "LENGTH")))
-        (signed (member (numeric-kind (ir-type-name (first arg-types))) '(:trap))))
-    (emit-stmt `(:decl (:name "uint8_t") ,digits nil :array 24))
-    (emit-stmt `(:decl (:name "uint64_t") ,length
-                       (:call ,(if signed "sheaf_signed_text" "sheaf_unsigned_text") ,(var digits) ,a)))
+(defun text-to-string (node text-call buffer-size)
+  "The string NODE builds from the bytes that the C call TEXT-CALL writes to a buffer of BUFFER-SIZE and returns the count of."
+  (let ((buffer (fresh-c-name (make-symbol "TEXT")))
+        (length (fresh-c-name (make-symbol "LENGTH"))))
+    (emit-stmt `(:decl (:name "uint8_t") ,buffer nil :array ,buffer-size))
+    (emit-stmt `(:decl (:name "uint64_t") ,length ,(funcall text-call (var buffer))))
     (let ((string (new-string node (var length))))
-      (emit-stmt `(:expr (:call "memcpy" (:-> ,string "e") ,(var digits) ,(var length))))
+      (emit-stmt `(:expr (:call "memcpy" (:-> ,string "e") ,(var buffer) ,(var length))))
       string)))
+
+(define-prelude-op :integer-to-string
+  (let ((function (if (eq (numeric-kind (ir-type-name (first arg-types))) :trap)
+                      "sheaf_signed_text"
+                      "sheaf_unsigned_text")))
+    (text-to-string node (lambda (buffer) `(:call ,function ,buffer ,a)) 24)))
+
+(define-prelude-op :float-to-string
+  (text-to-string node (lambda (buffer) `(:call "sheaf_float_text" ,buffer (:cast (:name "double") ,a))) 32))
+
+(define-prelude-op :char-to-string
+  (text-to-string node (lambda (buffer) `(:call "sheaf_char_text" ,buffer ,a)) 4))
 
 (define-prelude-op :char-code
   `(:cast (:name "uint64_t") ,a))
@@ -1173,7 +1184,8 @@ its loop's iteration began, then jump."
     (ir-return (emit-block-return node env))
     (ir-match (emit-match node target env))
     (ir-throw (emit-throw node env))
-    (ir-panic `((:expr (:call "sheaf_panic" (:string ,(ir-panic-message node))))))
+    (ir-panic (let ((message (atom-expr (ir-panic-message node) env)))
+                `((:expr (:call "sheaf_panic" (:-> ,message "e") (:-> ,message "length"))))))
     (ir-catch (emit-catch node target env))
     (ir-protect (emit-protect node target env))
     ((or ir-atom ir-prim ir-construct ir-call ir-foreign)
