@@ -48,8 +48,7 @@ that led to them, each with its type and source location.
 
 ## Limitations
 
-- Raw Lisp that uses a dictionary is an error: [#7](https://github.com/takeiteasy/sheaf/issues/7),
-  [#36](https://github.com/takeiteasy/sheaf/issues/36).
+- Raw Lisp that uses a dictionary is an error: [#7](https://github.com/takeiteasy/sheaf/issues/7).
 - Programs compiled for SBCL are not monomorphized, so a program can run there
   and still be rejected here: [#8](https://github.com/takeiteasy/sheaf/issues/8).
 

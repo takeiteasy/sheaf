@@ -51,7 +51,7 @@
   (is (zerop (count-ir (lowered "vectors") 'sheaf:ir-foreign)))
   (is (zerop (count-ir (lowered "hashtables") 'sheaf:ir-foreign)))
   (is (equal (sort (mapcar #'first sheaf::*prelude-ops*) #'string<)
-             (prelude-ops-used "arrays" "cells" "vectors" "hashtables" "vector-library" "lists"))))
+             (prelude-ops-used "arrays" "cells" "vectors" "hashtables" "vector-library" "lists" "table-iterators"))))
 
 (test standard-library-functions-run-on-every-tier
   (let ((expected (run-on-sbcl "stdlib")))
@@ -129,6 +129,12 @@
     (is (zerop (count-ir (lowered "extend") 'sheaf:ir-foreign)))
     (is (= expected (sheaf:run-lowered (lowered "extend"))))
     (is (= expected (sheaf:run-lowered (assigned "extend"))))))
+
+(test hashtable-iterators-run-on-every-tier
+  (let ((expected (run-on-sbcl "table-iterators")))
+    (is (zerop (count-ir (lowered "table-iterators") 'sheaf:ir-foreign)))
+    (is (= expected (sheaf:run-lowered (lowered "table-iterators"))))
+    (is (= expected (sheaf:run-lowered (assigned "table-iterators"))))))
 
 (test list-functions-run-on-every-tier
   (dolist (fixture '("lists" "poly"))

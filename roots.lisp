@@ -29,6 +29,7 @@ of its arguments and everything those reach."
     (:cell-new :allocates 0) (:vector-new :allocates) (:vector-with-capacity :allocates)
     (:vector-copy :allocates 0) (:vector-subseq :allocates 0)
     (:vector-pop-unsafe :reads 0) (:vector-reverse :reads 0) (:list-reverse :reads 0)
+    (:hashtable-slot-value :reads 0)
     (:hashtable-new :allocates) (:hashtable-with-capacity :allocates)
     (:vector-push :stores 0 1) (:vector-set :stores 1 2) (:hashtable-set :stores 2 0)
     (:grow-push :stores 1 0) (:stack-push :stores 1 0) (:ref-set :stores 1 0) (:elements-set :stores 2 0)

@@ -537,6 +537,23 @@ Returns its C variable."
                             ,(table-slot a) ,b)))
   (unit-literal type))
 
+(define-prelude-op :hashtable-next-slot
+  (let ((next (fresh-c-name (make-symbol "NEXT")))
+        (capacity `(:dot (:-> ,a "table") "capacity")))
+    (emit-stmt `(:decl (:name "uint64_t") ,next ,b))
+    (emit-stmt `(:while (:&& (:< ,(var next) ,capacity)
+                             (:== (:dot (:index (:-> ,a "e") ,(var next)) "used") (:int 0)))
+                        (:assign ,(var next) (:+ ,(var next) (:int 1)))))
+    `(:? (:< ,(var next) ,capacity)
+         ,(constructor-literal type "SOME" (var next))
+         ,(constructor-literal type "NONE"))))
+
+(define-prelude-op :hashtable-slot-key
+  `(:dot (:index (:-> ,a "e") ,b) "key"))
+
+(define-prelude-op :hashtable-slot-value
+  `(:dot (:index (:-> ,a "e") ,b) "value"))
+
 (define-prelude-op :hashtable-count
   `(:cast (:name "int64_t") (:dot (:-> ,a "table") "count")))
 

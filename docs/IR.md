@@ -85,7 +85,7 @@ well. An allocating one holds the stack it pushes to in `ir-prim-stack`.
 ## Limitations
 
 - Raw Lisp stays `ir-foreign`, which `run-lowered` and the emitter reject:
-  [#7](https://github.com/takeiteasy/sheaf/issues/7), [#36](https://github.com/takeiteasy/sheaf/issues/36).
+  [#7](https://github.com/takeiteasy/sheaf/issues/7).
 - `Integral`, `Reciprocable`, `Bits` and `Bit` are not primitives:
   [#21](https://github.com/takeiteasy/sheaf/issues/21).
 - A recursive `let` is an error: [#10](https://github.com/takeiteasy/sheaf/issues/10).

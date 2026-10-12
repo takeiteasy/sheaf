@@ -114,6 +114,7 @@ and exit code."
   (is (= (run-on-sbcl "vector-library") (c-result "vector-library")))
   (is (= (run-on-sbcl "lists") (c-result "lists")))
   (is (= (run-on-sbcl "extend") (c-result "extend")))
+  (is (= (run-on-sbcl "table-iterators") (c-result "table-iterators")))
   (is (= (run-on-sbcl "vector-folds") (c-result "vector-folds")))
   (is (= (run-on-sbcl "poly") (c-result "poly"))))
 

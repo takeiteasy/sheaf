@@ -58,7 +58,19 @@
   (is (= 42 (run-specialized (defunctionalized "constructors"))))
   (is (= 55 (run-specialized (defunctionalized "flows"))))
   (is (= (run-specialized (specialized "recursive-data"))
-         (run-specialized (defunctionalized "recursive-data")))))
+         (run-specialized (defunctionalized "recursive-data"))))
+  (dolist (fixture '("vector-folds" "extend" "lists"))
+    (is (= (run-on-sbcl fixture) (run-specialized (defunctionalized fixture))) "~a" fixture)))
+
+(test hashtable-iterators-run-on-coalton-backend
+  ;; Each function alone: Coalton's optimizer shares the table of `(hashtable:new)` between calls in one program.
+  (fixture-program "table-iterators")
+  (dolist (root '("KEY-SUM" "VALUE-SUM" "PAIR-SUM" "EMPTY-COUNT" "COPIED"))
+    (is (= (funcall (symbol-function (fixture-symbol "table-iterators" root)))
+           (run-specialized (sheaf:defunctionalize
+                             (sheaf:monomorphize (fixture-program "table-iterators")
+                                                 (fixture-symbol "table-iterators" root)))))
+        "~a" root)))
 
 (test a-function-passed-to-the-standard-library-is-analyzed
   (let ((result (defunctionalized "poly")))

@@ -24,7 +24,10 @@ binding it defines."
 (defparameter *prelude-replacements*
   '((coalton/vector:find-elem . sheaf/prelude/vector:vector-find-elem)
     (coalton/vector:sort-by! . sheaf/prelude/vector:vector-sort-by!)
-    (coalton/vector:with-initial-element . sheaf/prelude/vector:vector-with-initial-element))
+    (coalton/vector:with-initial-element . sheaf/prelude/vector:vector-with-initial-element)
+    (coalton/hashtable:entries . sheaf/prelude/hashtable:hashtable-entries)
+    (coalton/hashtable:keys . sheaf/prelude/hashtable:hashtable-keys)
+    (coalton/hashtable:values-iter . sheaf/prelude/hashtable:hashtable-values-iter))
   "The standard library functions whose raw Lisp the prelude replaces with Coalton,
 each with the function that stands in for it.")
 

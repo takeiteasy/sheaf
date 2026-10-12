@@ -48,8 +48,9 @@ does.
 
 ## Limitations
 
-- Standard library functions whose source holds raw Lisp stay raw Lisp:
-  [#36](https://github.com/takeiteasy/sheaf/issues/36).
+- Standard library functions whose source holds raw Lisp stay raw Lisp unless the
+  prelude replaces them ([PRELUDE.md](PRELUDE.md#replacements)):
+  [#22](https://github.com/takeiteasy/sheaf/issues/22).
 - Raw Lisp in user code, such as an `assert`, has no native translation:
   [#7](https://github.com/takeiteasy/sheaf/issues/7).
 - The SBCL path does not run Sheaf's checks yet:

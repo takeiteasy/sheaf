@@ -119,8 +119,7 @@ A slice past either limit prints `bank space exhausted` or `a bank slice exhaust
 
 - `handle`, `resumable` and `resume-to`:
   [#24](https://github.com/takeiteasy/sheaf/issues/24).
-- Raw Lisp is an error: [#7](https://github.com/takeiteasy/sheaf/issues/7),
-  [#36](https://github.com/takeiteasy/sheaf/issues/36).
+- Raw Lisp is an error: [#7](https://github.com/takeiteasy/sheaf/issues/7).
 - A scalar type that is not a number, such as `Char` or `String`:
   [#22](https://github.com/takeiteasy/sheaf/issues/22).
 - `Integer` is 64 bits: [#19](https://github.com/takeiteasy/sheaf/issues/19).

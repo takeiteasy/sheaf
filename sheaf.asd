@@ -13,7 +13,8 @@
                (:file "grow")
                (:file "stack")
                (:file "ref")
-               (:file "vector")))
+               (:file "vector")
+               (:file "hashtable")))
 
 (asdf:defsystem #:sheaf
   :description "A statically typed Lisp with no heap, built on a Coalton frontend"

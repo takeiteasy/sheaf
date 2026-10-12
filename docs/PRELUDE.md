@@ -54,6 +54,7 @@ instances are not consulted: keys compare as numbers.
 | `coalton/vector` | `(copy v)`, `(subseq v start end)`, `(resect! v start end)`, `(reverse! v)`, `(pop-unsafe! v)` | A new `Vector`, a new `Vector` of a range, a removal of a range, an in-place reversal, and a removal of the last element that is an error when empty; `start` and `end` may be in either order and past the end |
 | `coalton/vector` | `(with-capacity n)`, `(capacity v)`, `(set-capacity! n v)` | A `Vector`, its length, and a truncation to `n` when `n` is below the length[^capacity] |
 | `coalton/vector` | `fold`, `foldr`, `find-elem`, `sort-by!`, `sort!` | A fold from either end, the index of an element, and an in-place stable sort[^replaced] |
+| `coalton/hashtable` | `entries`, `keys`, `values-iter`, `extend!` | Iterators over a table, in no fixed order, and an insertion of every pair of an iterator |
 | `coalton/list` | `%reverse!` | A list reversed in place, which `map`, `take` and `split` use on a list they built[^reverse] |
 | `coalton/hashtable` | `(new)`, `(with-capacity n)`, `(make (k v) ...)` | A `HashTable`; the capacity is a hint |
 | `coalton/hashtable` | `(get h k)`, `(set! h k x)`, `(remove! h k)`, `(count h)` | An `Optional` value, a write, a removal, and the number of entries |
@@ -75,6 +76,7 @@ which keeps the original.
 | `Foldable Vector` `fold` and `foldr` | `vector-fold`, `vector-foldr` |
 | `coalton/vector:find-elem` | `vector-find-elem` |
 | `coalton/vector:with-initial-element` | `vector-with-initial-element`, since the original's iterator holds an assertion |
+| `coalton/hashtable:entries`, `keys`, `values-iter` | `hashtable-entries`, `hashtable-keys`, `hashtable-values-iter`, a cursor over the table's slots[^cursor] |
 | `coalton/vector:sort-by!` | `vector-sort-by!`, an insertion sort[^sort] |
 
 ## Where an array is built
@@ -90,9 +92,9 @@ stack when it grows.
 
 - A `HashTable` key other than `UFix` is a lowering error:
   [#20](https://github.com/takeiteasy/sheaf/issues/20).
-- `Vector` and `HashTable` functions other than the ones above that hold
-  raw Lisp or a `for` loop, such as `entries`, `keys` and `extend!`, are
-  errors: [#36](https://github.com/takeiteasy/sheaf/issues/36).
+- Other standard library functions that hold raw Lisp, such as those of `String`
+  and `Char`, are errors: [#22](https://github.com/takeiteasy/sheaf/issues/22),
+  [#7](https://github.com/takeiteasy/sheaf/issues/7).
 
 [^capacity]: Capacity is a hint. A `Vector` has no capacity of its own, so `capacity`
     is its length, and Coalton's backend reports the room it holds, which is
@@ -109,6 +111,11 @@ stack when it grows.
 [^sort]: Stable, where Coalton's backend sorts with `cl:sort`, which is not, so
     elements that compare equal may end in a different order on Coalton's backend.
     A sort of a long vector is slow: [#45](https://github.com/takeiteasy/sheaf/issues/45).
+
+[^cursor]: The iterators call `table-next-slot`, `table-slot-key` and
+    `table-slot-value`, which are primitives. In C a slot is a position in the
+    table's slots; on Coalton's backend, the position in its order, which a lookup
+    walks to, so an iteration there takes time quadratic in the table's size.
 
 [^len]: A `FixedArray` length is read from the type after monomorphization,
     through a table `define-length` fills. The `Extent` class that

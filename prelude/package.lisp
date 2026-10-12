@@ -33,6 +33,15 @@
   (:export #:vector-fold #:vector-foldr #:vector-find-elem #:vector-sort-by!
            #:vector-with-initial-element))
 
+(defpackage #:sheaf/prelude/hashtable
+  (:use #:coalton #:coalton-prelude)
+  (:local-nicknames (#:hashtable #:coalton/hashtable)
+                    (#:iter #:coalton/iterator)
+                    (#:cell #:coalton/cell)
+                    (#:shim #:coalton/hashtable-shim))
+  (:export #:table-next-slot #:table-slot-key #:table-slot-value
+           #:hashtable-entries #:hashtable-keys #:hashtable-values-iter))
+
 (defpackage #:sheaf/prelude/ref
   (:use #:coalton #:coalton-prelude)
   (:local-nicknames (#:prelude #:sheaf/prelude))

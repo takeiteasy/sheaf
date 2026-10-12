@@ -335,6 +335,18 @@ stacks and banks it saves, each with what it held on entry."
                       (live (first args) "A hashtable written")
                       (remhash (second args) (datum-fields (first args)))
                       (unit))
+                     (:hashtable-next-slot
+                      (live (first args) "A hashtable read")
+                      (if (< (second args) (hash-table-count (datum-fields (first args))))
+                          (make-datum (constructor-named lowered type "SOME") (list (second args)))
+                          (make-datum (constructor-named lowered type "NONE") '())))
+                     ((:hashtable-slot-key :hashtable-slot-value)
+                      (live (first args) "A hashtable read")
+                      (loop :for key :being :the :hash-keys :of (datum-fields (first args))
+                              :using (:hash-value value)
+                            :for slot :from 0
+                            :when (= slot (second args))
+                              :return (if (eq op :hashtable-slot-key) key value)))
                      (:hashtable-count
                       (live (first args) "A hashtable read")
                       (hash-table-count (datum-fields (first args))))
