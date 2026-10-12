@@ -394,6 +394,13 @@ for everything it evaluates first."
                         :cleanup (lower-body (ast:node-protect-cleanup node))
                         :type (lower-type (ast:node-type node)) :location *location*))
       (ast:node-catch (lower-catch node))
+      (ast:node-values
+       (let ((nodes (ast:node-values-nodes node)))
+         (cond ((null nodes)
+                (make-ir-construct :constructor 'coalton:unit :args '()
+                                   :type (lower-type tc:*unit-type*) :location *location*))
+               ((null (rest nodes)) (lower-simple (first nodes)))
+               (t (lowering-error "multiple values: https://github.com/takeiteasy/sheaf/issues/39")))))
       (ast:node-lisp
        (make-ir-foreign :vars (ast:node-lisp-vars node) :form (ast:node-lisp-form node)
                         :type (lower-type (ast:node-type node)) :location *location*))

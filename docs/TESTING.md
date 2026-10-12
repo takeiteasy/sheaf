@@ -18,6 +18,7 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `polyrec.lisp` | Polymorphic recursion, which monomorphization rejects |
 | `closures.lisp` | Lambdas reaching one slot, a function in a constructor, a returned closure, a recursive local function, a global used as a value |
 | `constructors.lisp` | A constructor passed to a function, stored in a variable and applied directly |
+| `voids.lisp` | A function returning `Void` whose branches produce no values |
 | `flows.lisp` | Functions as type arguments, in a list and bound to a global value; a recursive local function that captures a variable and passes itself on |
 | `nested.lisp` | A closure nested to a depth known only at runtime |
 | `recursive-data.lisp` | A data type holding a function, and a list of them |

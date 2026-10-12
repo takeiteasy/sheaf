@@ -60,6 +60,13 @@
     (is (= expected (sheaf:run-lowered (lowered "stdlib"))))
     (is (= expected (sheaf:run-lowered (assigned "stdlib"))))))
 
+(test a-function-returning-void-runs-on-every-tier
+  (let ((expected (run-on-sbcl "voids")))
+    (is (= 5 expected))
+    (is (zerop (count-ir (lowered "voids") 'sheaf:ir-foreign)))
+    (is (= expected (sheaf:run-lowered (lowered "voids"))))
+    (is (= expected (sheaf:run-lowered (assigned "voids"))))))
+
 (test cells-give-one-result-on-every-tier
   (let ((expected (run-on-sbcl "cells")))
     (is (= 29 expected))
