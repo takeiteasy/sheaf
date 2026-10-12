@@ -37,7 +37,7 @@ hook bound, and keeps each binding's IR in a `program`.
 | `global-references` | The globals a node refers to |
 | `reachable` | Globals reachable from a root, with and without IR |
 
-Captured IR carries a type on every node and a source location on most[^loc].
+Captured IR carries a type and a source location on every node[^loc].
 User code holds raw Lisp only where it writes `(lisp ...)` or uses a macro
 that expands to it, such as `assert`.
 
@@ -46,7 +46,6 @@ that expands to it, such as `assert`.
 - Bindings compiled before capture, including all of Coalton's standard
   library, only have Coalton's optimized IR, which inlines raw Lisp:
   [#3](https://github.com/takeiteasy/sheaf/issues/3).
-- Some nodes have no location: [#6](https://github.com/takeiteasy/sheaf/issues/6).
 - Raw Lisp in user code, such as an `assert`, has no native translation:
   [#7](https://github.com/takeiteasy/sheaf/issues/7).
 - The SBCL path does not run Sheaf's checks yet:
@@ -54,6 +53,7 @@ that expands to it, such as `assert`.
 - `handle`, `resumable` and `resume-to` are errors: [#24](https://github.com/takeiteasy/sheaf/issues/24).
 - `Integer` is 64 bits: [#19](https://github.com/takeiteasy/sheaf/issues/19).
 
-[^loc]: Nodes returned by Coalton's `translate-expression` and every
-    top-level binding have a location. Nodes a translation helper builds
-    directly, such as the variable in a call's operator position, do not.
+[^loc]: The fork stamps the node each translation method returns. A node a
+    helper builds takes the location of the expression being translated,
+    except a variable built from a source variable, which takes that
+    variable's own location.

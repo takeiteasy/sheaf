@@ -78,18 +78,13 @@
 
 (test specializations-keep-locations
   (maphash (lambda (name node)
-             (is-true (ast:node-location node) "~s has no location" name))
-           (sheaf:specialized-bindings (specialized "poly")))
-  ;; Capture locates every match and literal; see #6 for the rest.
-  (traverse:traverse
-   (gethash (sheaf:specialized-root (specialized "poly"))
-            (sheaf:specialized-bindings (specialized "poly")))
-   (list (traverse:action (:after ast:node-match n)
-           (is-true (ast:node-location n) "A match has no location")
-           (values))
-         (traverse:action (:after ast:node-literal n)
-           (is-true (ast:node-location n) "The literal ~s has no location" (ast:node-literal-value n))
-           (values)))))
+             (is-true (ast:node-location node) "~s has no location" name)
+             (traverse:traverse
+              node
+              (list (traverse:action (:after ast:node n)
+                      (is-true (ast:node-location n) "A ~s in ~s has no location" (type-of n) name)
+                      (values)))))
+           (sheaf:specialized-bindings (specialized "poly"))))
 
 (test polymorphic-recursion-is-bounded
   (let* ((program (fixture-program "polyrec"))
