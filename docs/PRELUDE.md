@@ -71,9 +71,9 @@ stack when it grows.
 
 - A `HashTable` key other than `UFix` is a lowering error:
   [#20](https://github.com/takeiteasy/sheaf/issues/20).
-- `Vector` and `HashTable` functions other than the ones above, such as
-  `entries`, `keys` and `extend!`, hold raw Lisp:
-  [#3](https://github.com/takeiteasy/sheaf/issues/3).
+- `Vector` and `HashTable` functions other than the ones above that hold
+  raw Lisp or a `for` loop, such as `capacity`, `entries`, `keys` and
+  `extend!`, are errors: [#36](https://github.com/takeiteasy/sheaf/issues/36).
 
 [^len]: A `FixedArray` length is read from the type after monomorphization,
     through a table `define-length` fills. The `Extent` class that

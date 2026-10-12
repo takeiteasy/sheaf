@@ -80,18 +80,12 @@ well. An allocating one holds the stack it pushes to in `ir-prim-stack`.
 
 ## Limitations
 
-- Raw Lisp in the standard library stays `ir-foreign`, which `run-lowered`
-  and the emitter reject: [#3](https://github.com/takeiteasy/sheaf/issues/3),
-  [#7](https://github.com/takeiteasy/sheaf/issues/7).
+- Raw Lisp stays `ir-foreign`, which `run-lowered` and the emitter reject:
+  [#7](https://github.com/takeiteasy/sheaf/issues/7), [#36](https://github.com/takeiteasy/sheaf/issues/36).
 - `Integral`, `Reciprocable`, `Bits` and `Bit` are not primitives:
   [#21](https://github.com/takeiteasy/sheaf/issues/21).
 - A recursive `let` or the node kinds defunctionalization rejects are
   errors: [#10](https://github.com/takeiteasy/sheaf/issues/10).
-- `Cell` functions other than `new`, `read`, `write!` and `swap!`, such as
-  `update!`, hold raw Lisp, as do `Vector` functions other than `new`, `push!`,
-  `pop!`, `index`, `index-unsafe`, `set!` and `length`, and `Hashtable`
-  functions other than `new`, `with-capacity`, `get`, `set!`, `remove!` and
-  `count`: [#3](https://github.com/takeiteasy/sheaf/issues/3).
 
 [^foreign]: The standard library mixes raw Lisp with Coalton's own runtime
     representations, such as `Optional` and `Cell`, so a fragment cannot run

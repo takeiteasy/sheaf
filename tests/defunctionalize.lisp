@@ -59,6 +59,11 @@
   (is (= (run-specialized (specialized "recursive-data"))
          (run-specialized (defunctionalized "recursive-data")))))
 
+(test a-function-passed-to-the-standard-library-is-analyzed
+  (let ((result (defunctionalized "poly")))
+    (is-true (sheaf:check-defunctionalized result))
+    (is (= 19 (run-specialized result)))))
+
 (test primitive-bodies-are-kept-as-they-were
   (let ((result (defunctionalized "hashtables")))
     (is-true (sheaf:check-defunctionalized result))

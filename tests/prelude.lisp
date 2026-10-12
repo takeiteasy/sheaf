@@ -53,6 +53,13 @@
   (is (equal (sort (mapcar #'first sheaf::*prelude-ops*) #'string<)
              (prelude-ops-used "arrays" "cells" "vectors" "hashtables"))))
 
+(test standard-library-functions-run-on-every-tier
+  (let ((expected (run-on-sbcl "stdlib")))
+    (is (= 19 expected))
+    (is (zerop (count-ir (lowered "stdlib") 'sheaf:ir-foreign)))
+    (is (= expected (sheaf:run-lowered (lowered "stdlib"))))
+    (is (= expected (sheaf:run-lowered (assigned "stdlib"))))))
+
 (test cells-give-one-result-on-every-tier
   (let ((expected (run-on-sbcl "cells")))
     (is (= 29 expected))

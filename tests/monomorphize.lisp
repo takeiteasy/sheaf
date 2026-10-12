@@ -31,7 +31,10 @@
          (types (loop :for definition :in (sheaf:specialized-type-definitions specialized)
                       :append (codegen-type-definition:codegen-type-definition definition env)))
          (forms (let ((settings:*emit-type-annotations* nil))
-                  (coalton-impl/codegen/program::compile-scc bindings env)))
+                  (loop :for scc :in (ast:node-binding-sccs bindings)
+                        :append (coalton-impl/codegen/program::compile-scc
+                                 (remove-if-not (lambda (binding) (find (car binding) scc)) bindings)
+                                 env))))
          (thunk (progn
                   (mapc #'eval types)
                   (let ((*error-output* (make-broadcast-stream)))

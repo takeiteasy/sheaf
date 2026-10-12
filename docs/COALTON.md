@@ -11,6 +11,7 @@ branch `sheaf`: upstream Coalton plus Sheaf's patches.
 | Codegen nodes carry a source location | Error messages that point at source |
 | Nodes built by translation helpers take a location | A location on every node, variables included |
 | `:CODEGEN-AST` codegen hook category | Each translation unit's IR before optimization |
+| `lookup-source-code` environment lookup | Any binding's IR from before optimization, the standard library's included |
 | `traverse` keeps a rewritten node's location | Locations that survive Sheaf's passes |
 
 ## Remotes

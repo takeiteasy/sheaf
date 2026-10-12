@@ -33,7 +33,7 @@ hook bound, and keeps each binding's IR in a `program`.
 | Function | Returns |
 |---|---|
 | `compile-program` | A `program` holding the IR of every binding the file defines |
-| `binding-code` | A global's IR, and whether the program captured it |
+| `binding-code` | A global's IR, and whether the program captured it; every binding has IR but constructors, class methods and dictionary constructors |
 | `global-references` | The globals a node refers to |
 | `reachable` | Globals reachable from a root, with and without IR |
 
@@ -41,11 +41,15 @@ Captured IR carries a type and a source location on every node[^loc].
 User code holds raw Lisp only where it writes `(lisp ...)` or uses a macro
 that expands to it, such as `assert`.
 
+A binding compiled before capture, such as the standard library, has the IR
+Coalton kept from before it optimized, which `binding-code` returns with
+`nil` for captured[^source]. That code holds raw Lisp only where the source
+does.
+
 ## Limitations
 
-- Bindings compiled before capture, including all of Coalton's standard
-  library, only have Coalton's optimized IR, which inlines raw Lisp:
-  [#3](https://github.com/takeiteasy/sheaf/issues/3).
+- Standard library functions whose source holds raw Lisp stay raw Lisp:
+  [#36](https://github.com/takeiteasy/sheaf/issues/36).
 - Raw Lisp in user code, such as an `assert`, has no native translation:
   [#7](https://github.com/takeiteasy/sheaf/issues/7).
 - The SBCL path does not run Sheaf's checks yet:
@@ -57,3 +61,7 @@ that expands to it, such as `assert`.
     helper builds takes the location of the expression being translated,
     except a variable built from a source variable, which takes that
     variable's own location.
+
+[^source]: The fork keeps each binding's IR in the environment as it is
+    translated, so it reaches the compiled files of every library. It adds
+    about 5% to compiled size and 3 MB to a loaded image.

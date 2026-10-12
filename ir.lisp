@@ -22,15 +22,13 @@ binding it defines."
     program))
 
 (defun binding-code (program name)
-  "The IR of the global NAME, and whether PROGRAM captured it."
+  "The IR of the global NAME, and whether PROGRAM captured it. A binding
+compiled before capture, such as the standard library, has the IR Coalton
+kept from before it optimized."
   (multiple-value-bind (node captured) (gethash name (program-bindings program))
     (if captured
         (values node t)
-        ;; TODO: bindings compiled before capture, the Coalton stdlib among
-        ;; them, only have the code Coalton stored after optimizing, which
-        ;; inlines raw Lisp forms. Capture or replace the stdlib instead.
-        ;; https://github.com/takeiteasy/sheaf/issues/3
-        (values (tc:lookup-code entry:*global-environment* name :no-error t) nil))))
+        (values (tc:lookup-source-code entry:*global-environment* name :no-error t) nil))))
 
 (defun global-references (node)
   "The global symbols NODE refers to, in the order first seen."

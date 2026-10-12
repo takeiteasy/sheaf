@@ -75,9 +75,6 @@ of the construct.
 - A closure nested inside closures to a depth known only at runtime, such as
   an iterator rebuilt in a loop, is an error:
   [#11](https://github.com/takeiteasy/sheaf/issues/11).
-- A function value passed to a standard library function that has no captured
-  code, such as the list `fold` reached through `map`, is an error:
-  [#3](https://github.com/takeiteasy/sheaf/issues/3).
 - Partial application, keyword arguments, constructors used as functions and
   the `for` and `values` forms are errors:
   [#10](https://github.com/takeiteasy/sheaf/issues/10).

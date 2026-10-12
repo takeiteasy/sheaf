@@ -94,6 +94,7 @@ and exit code."
 (test prelude-programs-match-the-interpreter-in-c
   (is (= 116 (c-result "arrays")))
   (is (= 29 (c-result "cells")))
+  (is (= 19 (c-result "stdlib")))
   (is (= 53 (c-result "vectors"))))
 
 (test growables-match-the-interpreter-in-c

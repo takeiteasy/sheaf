@@ -43,5 +43,12 @@
       (is (member name with-code) "~s is not reached" name))
     (is (member 'coalton/classes:+ without-code))))
 
+(test standard-library-bindings-have-their-code-from-before-optimization
+  (multiple-value-bind (node captured) (sheaf:binding-code (counter) 'coalton/cell:update!)
+    (is-false captured)
+    (is (typep node 'ast:node-abstraction))
+    (is (zerop (count-lisp-nodes node)))
+    (is-true (ast:node-location node))))
+
 (test captured-program-still-runs
   (is (= 287 (funcall (fixture "MAIN")))))
