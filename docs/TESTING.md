@@ -20,6 +20,7 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `constructors.lisp` | A constructor passed to a function, stored in a variable and applied directly |
 | `for-loops.lisp` | Each kind of `for` termination, parallel and sequential steps, `break`, `continue`, a result, a list carried in a variable, a `Vector` built in the body, nested loops, a return out of a loop |
 | `for-rejected.lisp` | A break out of a `catch` and a `Vector` variable built anew by a step |
+| `loop-reuse.lisp` | A loop that builds a list in each iteration in a small stack, and one that stores a list outside itself |
 | `loop-exits.lisp` | A `Vector` per iteration given back by `continue`, `break` and a return, in a small stack |
 | `returns.lisp` | An early return out of a branch, with a list built before it, past a `Vector` built locally, and from a lambda |
 | `returns-rejected.lisp` | A return out of a `catch` and of a `Vector` |

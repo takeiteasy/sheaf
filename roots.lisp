@@ -8,7 +8,7 @@
 (defvar *reference-types*)
 (defvar *here* nil "The location of the node being checked, for errors.")
 
-(defstruct (root-summary (:constructor make-root-summary (&key result stores locals reached bare-calls slice-free-calls call-roots)))
+(defstruct (root-summary (:constructor make-root-summary (&key result stores locals reached bare-calls bare-loops slice-free-calls call-roots)))
   "What a def does with the roots of its arguments. RESULT lists what its result
 may point into: a parameter index, `:global`, or `:fresh` for storage it builds
 in its caller's destinations. STORES lists the stores it leaves its caller to
@@ -17,9 +17,10 @@ into, and the chain of places that justifies it. LOCALS maps each name to its
 roots. REACHED lists the locals whose storage the result holds, which are built
 in the caller's destinations. BARE-CALLS lists the calls whose arguments point
 only into parameters and globals, and SLICE-FREE-CALLS those whose arguments
-reach no growable value the def built. CALL-ROOTS lists each call with the roots
+reach no growable value the def built. BARE-LOOPS lists the loops whose variables
+point only into parameters, globals and what was built before them. CALL-ROOTS lists each call with the roots
 of its arguments and everything those reach."
-  (result '()) (stores '()) (locals nil) (reached '()) (bare-calls '()) (slice-free-calls '())
+  (result '()) (stores '()) (locals nil) (reached '()) (bare-calls '()) (bare-loops '()) (slice-free-calls '())
   (call-roots '()))
 
 ;; op, how it treats roots, and the arguments it uses
@@ -119,6 +120,7 @@ is true a store that no caller could make safe is an error."
          (locals (make-hash-table :test 'eq))
          (stores '())
          (bare-calls '())
+         (bare-loops '())
          (call-roots '())
          (growable-lets (make-hash-table :test 'eq))
          (pending '())
@@ -327,6 +329,18 @@ REPORT is true, notes that they must not outlive what BODY frees."
                  (loop :for (name . nil) :in vars
                        :for var-roots :in roots
                        :do (setf (gethash name locals) var-roots))
+                 (let ((inner-names (mapcar #'car vars)))
+                   (walk-ir (lambda (inside)
+                              (when (ir-let-p inside) (push (ir-let-name inside) inner-names)))
+                            node)
+                   (when (every (lambda (var-roots)
+                                  (every (lambda (root)
+                                           (or (integerp root) (eq root :global)
+                                               (and (symbolp root) (not (keywordp root))
+                                                    (not (member root inner-names)))))
+                                         var-roots))
+                                roots)
+                     (push node bare-loops)))
                  (when (ir-loop-test node) (walk (ir-loop-test node) inner (1+ depth) owner))
                  (walk (ir-loop-body node) inner (1+ depth) owner)
                  (walk (ir-loop-returns node) inner depth owner)))
@@ -414,6 +428,7 @@ REPORT is true, notes that they must not outlive what BODY frees."
                              :locals locals
                              :reached reached
                              :bare-calls bare-calls
+                             :bare-loops bare-loops
                              :call-roots call-reach
                              :slice-free-calls
                              (loop :for (call nil reach) :in call-reach

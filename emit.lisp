@@ -885,16 +885,21 @@ test, body and steps again and again until the test or a break leaves, then its 
          (body `((:block
                    (:decl ,(c-type (ir-node-type (ir-loop-body node))) ,discarded nil :unused t)
                    ,@(emit-node (ir-loop-body node) discarded inner))))
-         (steps (emit-loop-steps node vars inner)))
+         (steps (emit-loop-steps node vars inner))
+         (resets (loop :for index :in (ir-loop-reset node)
+                       :collect (list :stack index (fresh-c-name (make-symbol "ITER"))))))
     `((:block
         ,@(loop :for (nil c-name type) :in vars
                 :for init :in (ir-loop-inits node)
                 :collect `(:decl ,(c-type type) ,c-name ,(atom-expr init env) :unused t))
+        ,@(loop :for (kind index mark) :in resets
+                :collect (mark-declaration kind index mark))
         (:label ,top)
         ,@test-statements
         ,@body
         ,@(when (first step-used) `((:label ,step)))
         ,@steps
+        ,@(emit-releases resets)
         (:goto ,top)
         ,@(when (first done-used) `((:label ,done)))
         ,@(emit-node (ir-loop-returns node) target inner)))))

@@ -129,16 +129,21 @@ A call that passes on a vector it built keeps its slices.
 
 A `for` loop keeps its variables in the function's frame. A growable local the
 body builds is freed when its iteration ends, by falling through, by `continue`
-or by `break`. A cell a step builds for a variable stays until the function
-ends, or goes in the result's destination if the loop's result holds it.
+or by `break`. The cells and arrays it builds go in the function's pool, and are
+freed when the iteration ends if the loop's variables point only into
+parameters, globals and what was built before the loop, and the iteration
+stores no value that holds storage[^loop]:
 
 ```lisp
-(for ((i 0 (+ i 1))
-      (xs (the (List UFix) Nil) (Cons i xs)))   ; each cell stays
-  :returns (len xs)
+(for ((i 0 (+ i 1)))                             ; each iteration's list is freed
   :while (< i n)
-  (let ((v (vector:new)))                        ; freed each iteration
-    (vector:push! i v)))
+  (let ((xs (Cons i (Cons 1 Nil))))
+    (cell:write! total (+ (cell:read total) (len xs)))))
+
+(for ((i 0 (+ i 1))
+      (xs (the (List UFix) Nil) (Cons i xs)))    ; each cell stays: the variable holds it
+  :returns (len xs)
+  :while (< i n))
 ```
 
 ## Banks
@@ -210,8 +215,8 @@ freed.
   it builds: [#33](https://github.com/takeiteasy/sheaf/issues/33).
 - A loop with a `catch` or `protect` keeps all it builds:
   [#32](https://github.com/takeiteasy/sheaf/issues/32).
-- A `for` loop keeps the cells its steps build until its function ends:
-  [#44](https://github.com/takeiteasy/sheaf/issues/44).
+- A `for` loop that carries a cell it built, or stores one outside itself, or
+  handles exceptions, keeps what it builds until its function ends.
 - A `for` variable holding a `Vector` or `Hashtable` cannot be built anew by a
   step: [#41](https://github.com/takeiteasy/sheaf/issues/41).
 - A growable local live across a call back into its own cycle is an error:

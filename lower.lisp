@@ -48,7 +48,7 @@
 (defstruct ir-branch pattern body)
 (defstruct (ir-block (:include ir-node)) label body)
 (defstruct (ir-return (:include ir-node)) label value)
-(defstruct (ir-loop (:include ir-node)) label vars inits sequential test exit-on steps body returns)
+(defstruct (ir-loop (:include ir-node)) label vars inits sequential test exit-on steps body returns (reset '()))
 (defstruct (ir-break (:include ir-node)) label)
 (defstruct (ir-continue (:include ir-node)) label)
 (defstruct (ir-throw (:include ir-node)) value)

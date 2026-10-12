@@ -95,6 +95,23 @@
                            (lambda ()
                              (sheaf:assign-stacks (lowered-from "for-rejected" "MAIN-REBUILT")))))))
 
+(defun loops-of (lowered)
+  "The loops in LOWERED."
+  (let ((loops '()))
+    (maphash (lambda (name def)
+               (declare (ignore name))
+               (sheaf:walk-ir (lambda (node) (when (typep node 'sheaf:ir-loop) (push node loops)))
+                              (sheaf:ir-def-body def)))
+             (sheaf:lowered-defs lowered))
+    loops))
+
+(test a-loop-that-gives-back-its-cells-runs-on-every-tier
+  (let ((expected (run-on-sbcl "loop-reuse")))
+    (is (= 200001 expected))
+    (is (= expected (sheaf:run-lowered (lowered "loop-reuse"))))
+    (is (= expected (sheaf:run-lowered (assigned "loop-reuse"))))
+    (is (= 1 (count-if #'sheaf:ir-loop-reset (loops-of (assigned "loop-reuse")))))))
+
 (test cells-give-one-result-on-every-tier
   (let ((expected (run-on-sbcl "cells")))
     (is (= 29 expected))

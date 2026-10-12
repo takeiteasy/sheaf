@@ -110,7 +110,7 @@ A slice past either limit prints `bank space exhausted` or `a bank slice exhaust
 | A tail call that frees its iteration's slices | `sheaf_bank_release` to the bank's `head` at the start of the iteration, then the jump |
 | A tail call to a function that tail calls back | A jump within one function that holds the whole cycle[^cycle] |
 | A `return` out of a block that is not the function's result | An assignment to the block's result, the stacks taken since the block began given back, and a `goto` to the label after the block |
-| A `for` loop | Its variables, then a label and a `goto` back to it, with `goto`s to the labels after the body and the loop for `continue` and `break`, each after giving back what the iteration took |
+| A `for` loop | Its variables, then a label and a `goto` back to it, with `goto`s to the labels after the body and the loop for `continue` and `break`, each after giving back what the iteration took, and the pool's `top` restored to its value at the start of the loop when its iterations build nothing that outlives them |
 | A global value | A function that computes it on first use |
 | A `match` | An `if` chain on the tags, ending in `sheaf_no_match()` |
 | A `throw`, `catch` or `protect` | Frames on a chain, with `_setjmp` and `_longjmp` ([EXCEPTIONS.md](EXCEPTIONS.md)) |

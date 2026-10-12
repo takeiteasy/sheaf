@@ -563,6 +563,19 @@ builds in next, and the stacks in use on entry."
   (destructuring-bind (&optional destination bank &rest growables) (gethash name *globals*)
     (clone-def name destination growables bank nil nil *global-busy*)))
 
+(defun loop-stores-p (node)
+  "Whether the loop NODE may store a value that holds storage, or runs code that
+handles exceptions, so what an iteration builds may outlive it."
+  (block found
+    (walk-ir (lambda (inside)
+               (when (typecase inside
+                       ((or ir-foreign ir-catch ir-protect) t)
+                       (ir-prim (stores-storage-p inside))
+                       (ir-call (root-summary-stores (gethash (ir-call-function inside) *summaries*))))
+                 (return-from found t)))
+             node)
+    nil))
+
 (defun keep-resets (def)
   "Clear the reset of each call in DEF that is not a tail call: only a call that
 nothing follows may give back what its iteration built."
@@ -740,7 +753,12 @@ uses it."
                                 :for step :in (ir-loop-steps node)
                                 :collect (and step (rewrite step (gethash name reached) busy owned supply owned-bank)))
                           (ir-loop-body copy) (rewrite (ir-loop-body node) nil busy owned supply owned-bank)
-                          (ir-loop-returns copy) (rewrite (ir-loop-returns node) reaches busy owned supply owned-bank))
+                          (ir-loop-returns copy) (rewrite (ir-loop-returns node) reaches busy owned supply owned-bank)
+                          (ir-loop-reset copy)
+                          (and pool (not cycle)
+                               (member node (root-summary-bare-loops (gethash (ir-def-name def) *summaries*)) :test #'eq)
+                               (not (loop-stores-p node))
+                               (list pool)))
                     copy))
                  (ir-catch
                   (let ((copy (copy-ir-catch node)))
@@ -843,6 +861,8 @@ stack below its stack count. Returns T."
                               (when (ir-let-bank node)
                                 (check-index (ir-let-bank node) "a bank"))
                               (check-distinct name (cons (ir-let-bank node) (ir-let-stacks node))))
+                      (ir-loop (dolist (index (ir-loop-reset node))
+                                 (check-index index "a loop's reset")))
                       (ir-catch (check-marks (ir-catch-marks node) (ir-catch-bank-marks node)))
                       (ir-protect (check-marks (ir-protect-marks node) (ir-protect-bank-marks node))
                                   (dolist (index (ir-protect-stacks node))

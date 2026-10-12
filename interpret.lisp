@@ -353,6 +353,9 @@ stacks and banks it saves, each with what it held on entry."
                       (break-tag (list nil))
                       (cell (list (mapcar (lambda (init) (evaluate init env)) (ir-loop-inits node))))
                       (test (ir-loop-test node))
+                      (marks (and stacks
+                                  (loop :for index :in (ir-loop-reset node)
+                                        :collect (list :stack index (stack-items (stack index))))))
                       (exit (and test (constructor-named lowered (ir-node-type test)
                                                          (if (eq (ir-loop-exit-on node) :true) "TRUE" "FALSE"))))
                       (final (catch break-tag
@@ -365,7 +368,8 @@ stacks and banks it saves, each with what it held on entry."
                                    (when (and test (eq exit (datum-constructor (evaluate test loop-env))))
                                      (throw break-tag loop-env))
                                    (catch continue-tag (evaluate (ir-loop-body node) loop-env))
-                                   (setf (car cell) (step-values node names (car cell) loop-env)))))))
+                                   (setf (car cell) (step-values node names (car cell) loop-env))
+                                   (give-back-since marks))))))
                  (evaluate (ir-loop-returns node) final)))
              (step-values (node names values env)
                "The values of the loop variables after one iteration, whose variables hold VALUES."

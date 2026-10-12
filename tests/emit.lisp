@@ -56,6 +56,12 @@ and exit code."
     (is (zerop code) "~a" errors)
     (is (= 19986 (parse-integer output)))))
 
+(test a-loop-gives-back-the-cells-its-iteration-built
+  (is (= 200001 (c-result "loop-reuse")))
+  (multiple-value-bind (output errors code) (run-c (assigned "loop-reuse") "-DSHEAF_STACK_SIZE=4096")
+    (is (zerop code) "~a" errors)
+    (is (= 200001 (parse-integer output)))))
+
 (test an-exhausted-data-stack-aborts
   (multiple-value-bind (output errors code) (run-c (assigned "tail") "-DSHEAF_STACK_SIZE=4096")
     (declare (ignore output))
