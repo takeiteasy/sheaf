@@ -210,9 +210,10 @@ freed.
   it builds: [#33](https://github.com/takeiteasy/sheaf/issues/33).
 - A loop with a `catch` or `protect` keeps all it builds:
   [#32](https://github.com/takeiteasy/sheaf/issues/32).
-- A `for` loop keeps the cells its steps build until its function ends, and a
-  variable holding a `Vector` or `Hashtable` cannot be built anew by a step:
-  [#41](https://github.com/takeiteasy/sheaf/issues/41).
+- A `for` loop keeps the cells its steps build until its function ends:
+  [#44](https://github.com/takeiteasy/sheaf/issues/44).
+- A `for` variable holding a `Vector` or `Hashtable` cannot be built anew by a
+  step: [#41](https://github.com/takeiteasy/sheaf/issues/41).
 - A growable local live across a call back into its own cycle is an error:
   [#17](https://github.com/takeiteasy/sheaf/issues/17).
 
