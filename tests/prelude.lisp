@@ -75,11 +75,26 @@
     (is (= expected (sheaf:run-lowered (lowered "returns"))))
     (is (= expected (sheaf:run-lowered (assigned "returns"))))))
 
-(test a-return-out-of-a-catch-or-of-a-growable-value-is-an-error
-  (is (search "issues/40" (error-message (lambda () (lowered-from "returns-rejected" "MAIN-CATCH")))))
-  (is (search "issues/43" (error-message
-                           (lambda ()
-                             (sheaf:assign-stacks (lowered-from "returns-rejected" "MAIN-GROWN")))))))
+(test a-return-out-of-a-catch-is-an-error
+  (is (search "issues/40" (error-message (lambda () (lowered-from "returns-rejected" "MAIN-CATCH"))))))
+
+(test an-early-return-of-a-growable-value-runs-on-every-tier
+  (let ((expected (run-on-sbcl "growable-returns")))
+    (is (zerop (count-ir (lowered "growable-returns") 'sheaf:ir-foreign)))
+    (is (plusp (count-ir (lowered "growable-returns") 'sheaf:ir-return)))
+    (is (= expected (sheaf:run-lowered (lowered "growable-returns"))))
+    (is (= expected (sheaf:run-lowered (assigned "growable-returns"))))))
+
+(test a-loop-gives-back-the-growable-values-its-body-builds-at-each-back-edge
+  (is (some (lambda (def)
+              (let ((found nil))
+                (sheaf:walk-ir (lambda (node)
+                                 (when (and (sheaf::ir-loop-p node) (sheaf::ir-loop-reset node))
+                                   (setf found t)))
+                               (sheaf:ir-def-body def))
+                found))
+            (loop :for def :being :the :hash-values :of (sheaf:lowered-defs (assigned "growable-returns"))
+                  :when (search "FOUND" (symbol-name (sheaf:ir-def-name def))) :collect def))))
 
 (test loops-run-on-every-tier
   (let ((expected (run-on-sbcl "for-loops")))

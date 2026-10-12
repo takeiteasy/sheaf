@@ -90,9 +90,10 @@ well. An allocating one holds the stack it pushes to in `ir-prim-stack`.
   [#21](https://github.com/takeiteasy/sheaf/issues/21).
 - A recursive `let` is an error: [#10](https://github.com/takeiteasy/sheaf/issues/10).
 - A return, break or continue out of a `catch` or `protect`, a return of a
-  growable value and a growable loop variable built anew by a step are errors:
+  growable value out of a block below a def's body and a growable loop variable
+  built anew by a step are errors:
   [#40](https://github.com/takeiteasy/sheaf/issues/40),
-  [#43](https://github.com/takeiteasy/sheaf/issues/43),
+  [#47](https://github.com/takeiteasy/sheaf/issues/47),
   [#41](https://github.com/takeiteasy/sheaf/issues/41).
 
 [^foreign]: The standard library mixes raw Lisp with Coalton's own runtime

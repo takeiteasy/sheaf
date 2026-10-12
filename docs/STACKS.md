@@ -146,6 +146,21 @@ stores no value that holds storage[^loop]:
   :while (< i n))
 ```
 
+## Early returns
+
+A `return` of a growable value builds it on the function's growable stacks, as
+the value it falls through to does. A loop body that builds one it may return
+gives it back at each back edge[^exit]:
+
+```lisp
+(define (find-pair limit target)
+  (for ((i 0 (+ i 1)))
+    :until (== i limit)
+    (let ((a (vector:new)))
+      (vector:push! i a)
+      (when (== i target) (return a)))))         ; the other iterations' vectors are freed
+```
+
 ## Banks
 
 A cycle that builds a growable value at every level, such as `vectors-down`,
@@ -268,3 +283,7 @@ freed.
 
 [^loop]: The loop restores the pool's top to its value at the loop's start after
     each iteration's steps. A `break` leaves what its last iteration built.
+
+[^exit]: The reset is on `ir-loop-reset`, as for a pool, and applies unless the
+    loop stores a value that holds storage or runs a handler. A `break` leaves
+    what its last iteration built.

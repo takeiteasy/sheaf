@@ -193,6 +193,11 @@ lets whose values reach the result."
     (ir-block (needs (ir-block-body node) reaches reached))
     ((or ir-return ir-break ir-continue) (values nil 0 nil))
     (ir-loop (multiple-value-bind (ordinary growables banked) (needs (ir-loop-returns node) reaches reached)
+               (dolist (part (remove nil (list (ir-loop-test node) (ir-loop-body node))))
+                 (multiple-value-bind (part-ordinary part-growables part-banked) (needs part nil reached)
+                   (setf ordinary (or ordinary part-ordinary)
+                         growables (max growables part-growables)
+                         banked (or banked part-banked))))
                (loop :for (name) :in (ir-loop-vars node)
                      :for step :in (ir-loop-steps node)
                      :when step
@@ -214,6 +219,12 @@ lets whose values reach the result."
                       (needs (ir-protect-cleanup node) nil reached)
                     (values (or ordinary cleanup-ordinary) (+ growables cleanup-growables)
                             (or banked cleanup-banked)))))))
+
+(defun loop-body-need (node reached)
+  "How many stacks the growable values the body and test of the loop NODE build for the result need."
+  (reduce #'max (remove nil (list (ir-loop-test node) (ir-loop-body node)))
+          :key (lambda (part) (nth-value 1 (needs part nil reached)))
+          :initial-value 0))
 
 (defun returns-own-name-p (let-node)
   "Whether LET-NODE ends by returning the value it binds."
@@ -755,10 +766,13 @@ uses it."
                           (ir-loop-body copy) (rewrite (ir-loop-body node) nil busy owned supply owned-bank)
                           (ir-loop-returns copy) (rewrite (ir-loop-returns node) reaches busy owned supply owned-bank)
                           (ir-loop-reset copy)
-                          (and pool (not cycle)
-                               (member node (root-summary-bare-loops (gethash (ir-def-name def) *summaries*)) :test #'eq)
-                               (not (loop-stores-p node))
-                               (list pool)))
+                          (unless (loop-stores-p node)
+                            (append (and pool (not cycle)
+                                         (member node (root-summary-bare-loops (gethash (ir-def-name def) *summaries*))
+                                                 :test #'eq)
+                                         (list pool))
+                                    ;; A growable the body builds for the result reaches it only by a return
+                                    (subseq supply 0 (min (length supply) (loop-body-need node reached))))))
                     copy))
                  (ir-catch
                   (let ((copy (copy-ir-catch node)))
@@ -881,21 +895,26 @@ stack below its stack count. Returns T."
      (lowered-defs lowered))
     t))
 
-(defun check-returns (lowered)
-  "Signal an error for a return out of a block of a growable value, and for a loop
-variable of one that a step builds anew."
+(defun check-exits (lowered)
+  "Signal an error for a return of a growable value out of a block below a def's
+root, and for a loop variable of one that a step builds anew."
   (maphash (lambda (name def)
-             (walk-ir (lambda (node)
-                        (when (and (ir-return-p node) (holds-growable-p (ir-node-type (ir-return-value node))))
-                          (error "~s returns a growable value out of a block: https://github.com/takeiteasy/sheaf/issues/43"
-                                 name))
-                        (when (ir-loop-p node)
-                          (loop :for (nil . type) :in (ir-loop-vars node)
-                                :for step :in (ir-loop-steps node)
-                                :when (and step (holds-growable-p type) (not (typep step 'ir-atom)))
-                                  :do (error "~s builds a growable loop variable anew in each iteration: https://github.com/takeiteasy/sheaf/issues/41"
-                                             name))))
-                      (ir-def-body def)))
+             (let* ((body (ir-def-body def))
+                    (root (and (ir-block-p body) (ir-block-label body))))
+               (walk-ir (lambda (node)
+                          ;; TODO: tail-need, tail-banked-p and returns-own-name-p count the values a block returns early (#47)
+                          (when (and (ir-return-p node)
+                                     (not (eq (ir-return-label node) root))
+                                     (holds-growable-p (ir-node-type (ir-return-value node))))
+                            (error "~s returns a growable value out of a block below its body: https://github.com/takeiteasy/sheaf/issues/47"
+                                   name))
+                          (when (ir-loop-p node)
+                            (loop :for (nil . type) :in (ir-loop-vars node)
+                                  :for step :in (ir-loop-steps node)
+                                  :when (and step (holds-growable-p type) (not (typep step 'ir-atom)))
+                                    :do (error "~s builds a growable loop variable anew in each iteration: https://github.com/takeiteasy/sheaf/issues/41"
+                                               name))))
+                        body)))
            (lowered-defs lowered)))
 
 (defun assign-stacks (lowered)
@@ -918,7 +937,7 @@ called in, so every stack index is a constant. Returns the new program, whose
          (*global-busy* '())
          (*stack-count* 0)
          (root (gethash (lowered-root lowered) defs)))
-    (check-returns lowered)
+    (check-exits lowered)
     (find-swaps defs)
     (flet ((take-global (name)
              (let ((placement (gethash name *placements*)))

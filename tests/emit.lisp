@@ -215,3 +215,7 @@ and exit code."
   (is (= 500011500027
          (parse-integer (run-c (sheaf:assign-stacks (lowered-from "alternating-loops" "BIG-LISTS"))
                                "-DSHEAF_STACK_SIZE=4096")))))
+
+(test an-early-return-of-a-growable-value-matches-in-c
+  (is (= (run-on-sbcl "growable-returns")
+         (parse-integer (run-c (assigned "growable-returns") "-fsanitize=address" "-g")))))
