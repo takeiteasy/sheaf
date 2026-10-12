@@ -265,3 +265,6 @@ freed.
 [^region]: A cycle of functions whose results hold no storage and that build
     no cells or arrays takes no region. Growable values go on stacks of their
     own, so a cycle that builds only those takes none either.
+
+[^loop]: The loop restores the pool's top to its value at the loop's start after
+    each iteration's steps. A `break` leaves what its last iteration built.
