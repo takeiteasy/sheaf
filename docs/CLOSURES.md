@@ -41,6 +41,7 @@ a call through it is a direct call.
 | A function type | A union with one case per lambda that reaches it[^sets] |
 | A lambda | The constructor of its case, applied to its captures; its body becomes a global taking the captures, then the arguments |
 | A global used as a value | A case with no captures |
+| A constructor used as a function value | A lambda that applies it, so a case like any other |
 | A call through a function value | A `match` on the tag; a direct call when the union has one case and no captures |
 | A higher-order function | One specialization per combination of lambda sets it is used with |
 | A data type with a function in a field, such as `Iterator` | One type per combination of lambda sets, with the fields' types replaced |
@@ -75,9 +76,10 @@ of the construct.
 - A closure nested inside closures to a depth known only at runtime, such as
   an iterator rebuilt in a loop, is an error:
   [#11](https://github.com/takeiteasy/sheaf/issues/11).
-- Partial application, keyword arguments, constructors used as functions and
-  the `for` and `values` forms are errors:
-  [#10](https://github.com/takeiteasy/sheaf/issues/10).
+- Partial application and the `for`, `block` and `return-from` forms are errors:
+  [#10](https://github.com/takeiteasy/sheaf/issues/10). Keyword arguments, `dynamic-let` and
+  multiple values are errors too: [#37](https://github.com/takeiteasy/sheaf/issues/37),
+  [#38](https://github.com/takeiteasy/sheaf/issues/38), [#39](https://github.com/takeiteasy/sheaf/issues/39).
 - `handle`, `resumable` and `resume-to` are errors:
   [#24](https://github.com/takeiteasy/sheaf/issues/24).
 - A `Cell` captured by only one closure stays a separate value, not a field of

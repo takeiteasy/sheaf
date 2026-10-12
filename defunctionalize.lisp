@@ -738,6 +738,58 @@ they are: lowering replaces every call of one."
              (specialized-bindings specialized))
     names))
 
+(defun constructor-lambda (variable)
+  "The lambda that applies the constructor VARIABLE, a constructor used as a function."
+  (let* ((type (ast:node-type variable))
+         (location (ast:node-location variable))
+         (names (loop :for nil :in (tc:function-ty-positional-input-types type)
+                      :collect (gensym "FIELD"))))
+    (ast:make-node-abstraction
+     :type type :location location :vars names
+     :subexpr (ast:make-node-direct-application
+               :type (tc:output-types-result-type (tc:function-ty-output-types type))
+               :location location :properties '() :rator-type type
+               :rator (ast:node-variable-value variable)
+               :rands (loop :for name :in names
+                            :for field :in (tc:function-ty-positional-input-types type)
+                            :collect (ast:make-node-local-variable :type field :value name
+                                                                   :location location))))))
+
+(defun expand-constructors (node bindings)
+  "NODE with each constructor used as a function value replaced by a lambda.
+BINDINGS holds the names that are code, not constructors."
+  (let ((expanded (make-hash-table :test 'eq)))
+    (flet ((expand (variable)
+             (let ((name (ast:node-variable-value variable)))
+               (when (and (typep (ast:node-type variable) 'tc:function-ty)
+                          (not (nth-value 1 (gethash name bindings)))
+                          (constructor-p name))
+                 (let ((lambda (constructor-lambda variable)))
+                   (setf (gethash lambda expanded) variable)
+                   lambda)))))
+      (traverse:traverse
+       node
+       (list
+        (traverse:action (:after ast:node-global-variable variable) (expand variable))
+        (traverse:action (:after ast:node-local-variable variable) (expand variable))
+        (traverse:action (:after ast:node-application application)
+          (let ((original (gethash (ast:node-application-rator application) expanded)))
+            (when original
+              (ast:make-node-application
+               :type (ast:node-type application) :location (ast:node-location application)
+               :properties (ast:node-application-properties application)
+               :rator original :rands (ast:node-application-rands application)
+               :keyword-rands (ast:node-application-keyword-rands application))))))))))
+
+(defun expand-bindings (bindings primitives)
+  "A copy of the table BINDINGS in which constructors used as functions are lambdas."
+  (let ((result (make-hash-table :test 'eq)))
+    (maphash (lambda (name node)
+               (setf (gethash name result)
+                     (if (gethash name primitives) node (expand-constructors node bindings))))
+             bindings)
+    result))
+
 (defun analyze (specialized)
   "Find the lambdas that reach every function-typed slot of SPECIALIZED."
   (let* ((*unified* (make-hash-table :test 'eq))
@@ -750,8 +802,8 @@ they are: lowering replaces every call of one."
          (*group-lams* (make-hash-table :test 'eq))
          (*owner* nil)
          (*at* nil)
-         (bindings (specialized-bindings specialized))
          (primitives (primitive-names specialized))
+         (bindings (expand-bindings (specialized-bindings specialized) primitives))
          (*primitive-names* primitives))
     (dolist (scc (binding-sccs bindings))
       (let ((scc (remove-if (lambda (name) (gethash name primitives)) scc)))

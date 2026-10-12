@@ -49,12 +49,13 @@
           :return (tc:function-return-type (ast:node-type node))))
 
 (test defunctionalized-programs-are-first-order
-  (dolist (fixture '("counter" "closures" "flows" "recursive-data"))
+  (dolist (fixture '("counter" "closures" "constructors" "flows" "recursive-data"))
     (is-true (sheaf:check-defunctionalized (defunctionalized fixture)) "~a" fixture)))
 
 (test defunctionalized-programs-run
   (is (= 287 (run-specialized (defunctionalized "counter"))))
   (is (= 51 (run-specialized (defunctionalized "closures"))))
+  (is (= 42 (run-specialized (defunctionalized "constructors"))))
   (is (= 55 (run-specialized (defunctionalized "flows"))))
   (is (= (run-specialized (specialized "recursive-data"))
          (run-specialized (defunctionalized "recursive-data")))))
