@@ -51,7 +51,7 @@
   (is (zerop (count-ir (lowered "vectors") 'sheaf:ir-foreign)))
   (is (zerop (count-ir (lowered "hashtables") 'sheaf:ir-foreign)))
   (is (equal (sort (mapcar #'first sheaf::*prelude-ops*) #'string<)
-             (prelude-ops-used "arrays" "cells" "vectors" "hashtables"))))
+             (prelude-ops-used "arrays" "cells" "vectors" "hashtables" "vector-library"))))
 
 (test standard-library-functions-run-on-every-tier
   (let ((expected (run-on-sbcl "stdlib")))
@@ -111,6 +111,12 @@
     (is (= expected (sheaf:run-lowered (lowered "loop-reuse"))))
     (is (= expected (sheaf:run-lowered (assigned "loop-reuse"))))
     (is (= 1 (count-if #'sheaf:ir-loop-reset (loops-of (assigned "loop-reuse")))))))
+
+(test vector-functions-run-on-every-tier
+  (let ((expected (run-on-sbcl "vector-library")))
+    (is (zerop (count-ir (lowered "vector-library") 'sheaf:ir-foreign)))
+    (is (= expected (sheaf:run-lowered (lowered "vector-library"))))
+    (is (= expected (sheaf:run-lowered (assigned "vector-library"))))))
 
 (test cells-give-one-result-on-every-tier
   (let ((expected (run-on-sbcl "cells")))

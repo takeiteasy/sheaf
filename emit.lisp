@@ -365,7 +365,96 @@ returns the expression."
   (emit-stmt `(:assign ,(checked (third arg-types) c a) ,b))
   (unit-literal type))
 
-(define-prelude-op (:vector-length :elements-length)
+(define-prelude-op :vector-with-capacity
+  (new-growable node))
+
+(define-prelude-op :vector-set-capacity
+  (let ((length `(:-> ,b "length")))
+    (emit-stmt `(:if (:< ,a ,length)
+                     ((:expr (:call "sheaf_shrink" (:-> ,b "stack")
+                                    (:+ (:-> ,b "e") ,length) (:+ (:-> ,b "e") ,a)))
+                      (:assign ,length ,a))))
+    (unit-literal type)))
+
+(define-prelude-op :vector-pop-unsafe
+  (let ((index (fresh-c-name (make-symbol "INDEX")))
+        (value (fresh-c-name (make-symbol "POPPED")))
+        (length `(:-> ,a "length")))
+    (emit-stmt `(:decl (:name "uint64_t") ,index (:call "sheaf_index" (:- ,length (:int 1)) ,length)))
+    (emit-stmt `(:decl ,(c-type type) ,value (:index (:-> ,a "e") ,(var index))))
+    (emit-stmt `(:assign ,length ,(var index)))
+    (emit-stmt `(:expr (:call "sheaf_shrink" (:-> ,a "stack")
+                              (:+ (:-> ,a "e") (:+ ,(var index) (:int 1)))
+                              (:+ (:-> ,a "e") ,(var index)))))
+    (var value)))
+
+(defun clamped-range (length start end)
+  "Declare the C variables for the range of START and END in either order, held
+to LENGTH. Returns the names of its start and end."
+  (let ((real-end (fresh-c-name (make-symbol "REAL_END")))
+        (real-start (fresh-c-name (make-symbol "REAL_START")))
+        (high (fresh-c-name (make-symbol "HIGH")))
+        (low (fresh-c-name (make-symbol "LOW"))))
+    (emit-stmt `(:decl (:name "uint64_t") ,high (:? (:> ,start ,end) ,start ,end)))
+    (emit-stmt `(:decl (:name "uint64_t") ,low (:? (:< ,start ,end) ,start ,end)))
+    (emit-stmt `(:decl (:name "uint64_t") ,real-end (:? (:< ,(var high) ,length) ,(var high) ,length)))
+    (emit-stmt `(:decl (:name "uint64_t") ,real-start (:? (:< ,(var low) ,(var real-end)) ,(var low) ,(var real-end))))
+    (values (var real-start) (var real-end))))
+
+(defun copy-elements (node source start end)
+  "Push the growable NODE builds holding the elements of SOURCE from START up to END.
+Returns its C variable."
+  (let* ((type (ir-node-type node))
+         (copy (new-growable node))
+         (count (fresh-c-name (make-symbol "COUNT")))
+         (elem (element-c type))
+         (room (fresh-c-name (make-symbol "ROOM"))))
+    (emit-stmt `(:decl (:name "uint64_t") ,count (:- ,end ,start)))
+    (emit-stmt `(:decl (:ptr ,elem) ,room
+                       (:call "sheaf_grow" (:-> ,copy "stack") (:-> ,copy "e")
+                              (:* ,(var count) (:sizeof ,elem)))))
+    (emit-stmt `(:expr (:call "memcpy" ,(var room) (:+ (:-> ,source "e") ,start)
+                              (:* ,(var count) (:sizeof ,elem)))))
+    (emit-stmt `(:assign (:-> ,copy "length") ,(var count)))
+    copy))
+
+(define-prelude-op :vector-copy
+  (copy-elements node a '(:int 0) `(:-> ,a "length")))
+
+(define-prelude-op :vector-subseq
+  (multiple-value-bind (start end) (clamped-range `(:-> ,a "length") b c)
+    (copy-elements node a start end)))
+
+(define-prelude-op :vector-resect
+  (let ((length `(:-> ,a "length"))
+        (elem (element-c (first arg-types))))
+    (multiple-value-bind (start end) (clamped-range length b c)
+      (let ((kept (fresh-c-name (make-symbol "KEPT")))
+            (removed (fresh-c-name (make-symbol "REMOVED"))))
+        (emit-stmt `(:decl (:name "uint64_t") ,removed (:- ,end ,start)))
+        (emit-stmt `(:decl (:name "uint64_t") ,kept (:- ,length ,(var removed))))
+        (emit-stmt `(:if (:> ,(var removed) (:int 0))
+                         ((:expr (:call "memmove" (:+ (:-> ,a "e") ,start) (:+ (:-> ,a "e") ,end)
+                                        (:* (:- ,length ,end) (:sizeof ,elem))))
+                          (:expr (:call "sheaf_shrink" (:-> ,a "stack")
+                                        (:+ (:-> ,a "e") ,length) (:+ (:-> ,a "e") ,(var kept))))
+                          (:assign ,length ,(var kept)))))
+        (unit-literal type)))))
+
+(define-prelude-op :vector-reverse
+  (let ((low (fresh-c-name (make-symbol "LOW")))
+        (swap (fresh-c-name (make-symbol "SWAP")))
+        (data `(:-> ,a "e"))
+        (length `(:-> ,a "length")))
+    (emit-stmt `(:for (:decl (:name "uint64_t") ,low (:int 0))
+                      (:< (:+ (:* ,(var low) (:int 2)) (:int 1)) ,length)
+                      (:post++ ,(var low))
+                      (:decl ,(element-c (first arg-types)) ,swap (:index ,data ,(var low)))
+                      (:assign (:index ,data ,(var low)) (:index ,data (:- (:- ,length (:int 1)) ,(var low))))
+                      (:assign (:index ,data (:- (:- ,length (:int 1)) ,(var low))) ,(var swap))))
+    a))
+
+(define-prelude-op (:vector-length :vector-capacity :elements-length)
   (nth-value 1 (element-access (first arg-types) a)))
 
 (define-prelude-op :elements-index

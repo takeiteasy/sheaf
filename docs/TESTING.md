@@ -22,6 +22,7 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `for-rejected.lisp` | A break out of a `catch` and a `Vector` variable built anew by a step |
 | `loop-reuse.lisp` | A loop that builds a list in each iteration in a small stack, and one that stores a list outside itself |
 | `loop-exits.lisp` | A `Vector` per iteration given back by `continue`, `break` and a return, in a small stack |
+| `vector-library.lisp` | `copy`, `subseq` with ranges reversed and past the end, `reverse!`, `resect!`, `set-capacity!`, `pop-unsafe!` and `with-capacity` |
 | `returns.lisp` | An early return out of a branch, with a list built before it, past a `Vector` built locally, and from a lambda |
 | `returns-rejected.lisp` | A return out of a `catch` and of a `Vector` |
 | `voids.lisp` | A function returning `Void` whose branches produce no values |
