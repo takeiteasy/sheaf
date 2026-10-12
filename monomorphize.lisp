@@ -473,11 +473,8 @@ dictionary arguments removed from every type."
         (traverse:action (:after ast:node-lisp n)
           (dolist (var (ast:node-lisp-vars n))
             (when (member (cdr var) binders)
-              ;; TODO: only optimized stdlib code passes dictionaries to raw
-              ;; Lisp; capturing the stdlib removes this case.
-              ;; https://github.com/takeiteasy/sheaf/issues/3
               (specialization-error (request-chain *current*)
-                                    "Raw Lisp uses the dictionary ~s" (cdr var))))
+                                    "Internal error: raw Lisp uses the dictionary ~s" (cdr var))))
           (values))
         (traverse:action (:after ast:node n)
           (ast:copy-node n (erase-dictionaries (ast:node-type n)))))))))
