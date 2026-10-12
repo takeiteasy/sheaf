@@ -6,7 +6,7 @@
 ;;; Expressions and types
 
 (defparameter *binary-operators*
-  '((:* "*" 13) (:+ "+" 12) (:- "-" 12) (:< "<" 10) (:> ">" 10) (:== "==" 9) (:&& "&&" 5))
+  '((:* "*" 13) (:+ "+" 12) (:- "-" 12) (:< "<" 10) (:> ">" 10) (:== "==" 9) (:!= "!=" 9) (:&& "&&" 5))
   "The operators that take two operands: the C text and the precedence of each.")
 
 (defun float-negative-p (value)
@@ -73,7 +73,7 @@
       (:sizeof (format nil "sizeof(~a)" (c-text (first args))))
       (:alignof (format nil "_Alignof(~a)" (c-text (first args))))
       (:offsetof (format nil "offsetof(~a, ~a)" (c-text (first args)) (second args)))
-      ((:* :+ :- :< :> :== :&&)
+      ((:* :+ :- :< :> :== :!= :&&)
        (destructuring-bind (text precedence) (rest (assoc kind *binary-operators*))
          (format nil "~a ~a ~a" (operand (first args) precedence) text (operand (second args) (1+ precedence))))))))
 
@@ -171,6 +171,11 @@
                                             :collect (format nil "~a SHEAF_UNUSED"
                                                              (declaration-text param-type param-name)))
                                       :public public))
+           (print-c body stream (1+ depth))
+           (print-line stream depth "}")))
+        (:while
+         (destructuring-bind (test &rest body) args
+           (print-line stream depth "while (~a) {" (c-text test))
            (print-c body stream (1+ depth))
            (print-line stream depth "}")))
         (:for

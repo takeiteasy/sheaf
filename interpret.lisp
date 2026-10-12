@@ -302,6 +302,19 @@ stacks and banks it saves, each with what it held on entry."
                               (replace fields fields :start1 start :start2 end)
                               (setf (fill-pointer fields) (- (length fields) (- end start)))))))
                       (unit))
+                     (:list-reverse
+                      (live (first args) "A list reversed")
+                      (flet ((link (cell) (second (datum-fields cell)))
+                             (cons-cell-p (cell) (string= (symbol-name (datum-constructor cell)) "CONS")))
+                        (let ((end (first args)))
+                          (loop :while (cons-cell-p end) :do (setf end (link end)))
+                          (let ((previous end) (current (first args)))
+                            (loop :until (eq current end)
+                                  :do (let ((next (link current)))
+                                        (setf (second (datum-fields current)) previous
+                                              previous current
+                                              current next)))
+                            previous))))
                      (:vector-reverse
                       (live (first args) "A vector written")
                       (let ((fields (datum-fields (first args))))

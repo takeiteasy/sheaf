@@ -93,6 +93,10 @@
                                        (:post++ (:name "i"))
                                        (:assign (:index ,*a* (:name "i")) ,*b*)))))))
 
+(test a-while-loop-tests-before-its-body
+  (is (string= (format nil "while (a != b) {~%  a = b;~%}~%")
+               (c-lines `(:while (:!= ,*a* ,*b*) (:assign ,*a* ,*b*))))))
+
 (test structs-print-their-members
   (is (string= (format nil "struct T1 {~%  uint32_t tag;~%  union {~%    struct {~%      uint64_t f0;~%      struct T1 *f1;~%    } c0;~%  } u;~%};~%")
                (c-lines '(:struct-def "T1" (:field (:name "uint32_t") "tag")

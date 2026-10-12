@@ -441,6 +441,26 @@ Returns its C variable."
                           (:assign ,length ,(var kept)))))
         (unit-literal type)))))
 
+(define-prelude-op :list-reverse
+  (let* ((cons-tag (ir-constructor-tag (named-constructor *lowered* type "CONS")))
+         (end (fresh-c-name (make-symbol "END")))
+         (previous (fresh-c-name (make-symbol "PREVIOUS")))
+         (current (fresh-c-name (make-symbol "CURRENT")))
+         (next (fresh-c-name (make-symbol "NEXT"))))
+    (flet ((link (cell)
+             (member-access cell type "u" (format nil "c~d" cons-tag) "f1")))
+      (emit-stmt `(:decl ,(c-type type) ,end ,a))
+      (emit-stmt `(:while (:== ,(member-access (var end) type "tag") (:int ,cons-tag))
+                          (:assign ,(var end) ,(link (var end)))))
+      (emit-stmt `(:decl ,(c-type type) ,previous ,(var end)))
+      (emit-stmt `(:decl ,(c-type type) ,current ,a))
+      (emit-stmt `(:while (:!= ,(var current) ,(var end))
+                          (:decl ,(c-type type) ,next ,(link (var current)))
+                          (:assign ,(link (var current)) ,(var previous))
+                          (:assign ,(var previous) ,(var current))
+                          (:assign ,(var current) ,(var next))))
+      (var previous))))
+
 (define-prelude-op :vector-reverse
   (let ((low (fresh-c-name (make-symbol "LOW")))
         (swap (fresh-c-name (make-symbol "SWAP")))

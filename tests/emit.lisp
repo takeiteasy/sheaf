@@ -111,7 +111,9 @@ and exit code."
   (is (= 224 (c-result "returns")))
   (is (= 500 (c-result "for-loops")))
   (is (= 53 (c-result "vectors")))
-  (is (= (run-on-sbcl "vector-library") (c-result "vector-library"))))
+  (is (= (run-on-sbcl "vector-library") (c-result "vector-library")))
+  (is (= (run-on-sbcl "lists") (c-result "lists")))
+  (is (= (run-on-sbcl "poly") (c-result "poly"))))
 
 (test growables-match-the-interpreter-in-c
   (dolist (root '("MAIN-TWO" "MAIN-LIST" "MAIN-RELAY" "MAIN-EITHER" "MAIN-LISTED" "MAIN-DOWN"

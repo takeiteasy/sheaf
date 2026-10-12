@@ -53,6 +53,7 @@ instances are not consulted: keys compare as numbers.
 | `coalton/vector` | `(index i v)`, `(index-unsafe i v)`, `(set! i x v)`, `(length v)` | An `Optional` element, an element, a write, and the length |
 | `coalton/vector` | `(copy v)`, `(subseq v start end)`, `(resect! v start end)`, `(reverse! v)`, `(pop-unsafe! v)` | A new `Vector`, a new `Vector` of a range, a removal of a range, an in-place reversal, and a removal of the last element that is an error when empty; `start` and `end` may be in either order and past the end |
 | `coalton/vector` | `(with-capacity n)`, `(capacity v)`, `(set-capacity! n v)` | A `Vector`, its length, and a truncation to `n` when `n` is below the length[^capacity] |
+| `coalton/list` | `%reverse!` | A list reversed in place, which `map`, `take` and `split` use on a list they built[^reverse] |
 | `coalton/hashtable` | `(new)`, `(with-capacity n)`, `(make (k v) ...)` | A `HashTable`; the capacity is a hint |
 | `coalton/hashtable` | `(get h k)`, `(set! h k x)`, `(remove! h k)`, `(count h)` | An `Optional` value, a write, a removal, and the number of entries |
 | `coalton/cell` | `(new x)`, `(read c)`, `(write! c x)`, `(swap! c x)` | A `Cell`, its contents, and a write that returns the new or the old value |
@@ -80,6 +81,10 @@ stack when it grows.
 [^capacity]: Capacity is a hint. A `Vector` has no capacity of its own, so `capacity`
     is its length, and Coalton's backend reports the room it holds, which is
     never less. A program that reads the number sees different values.
+
+[^reverse]: The cells of the list are relinked, so it is only safe on a list
+    whose cells outlive none of the cells they point to after the relink: the
+    standard library uses it on lists it has just built.
 
 [^len]: A `FixedArray` length is read from the type after monomorphization,
     through a table `define-length` fills. The `Extent` class that
