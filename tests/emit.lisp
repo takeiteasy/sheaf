@@ -185,3 +185,11 @@ and exit code."
 
 (test a-loop-that-alternates-gives-its-spare-region-back-before-it-jumps
   (is (search "frame_mark_" (with-output-to-string (out) (sheaf:emit-c (big-alternating-loops) out)))))
+
+(test a-loop-that-copies-out-runs-in-two-small-stacks
+  (multiple-value-bind (compiled interpreted) (c-result-from "alternating-loops" "MAIN-LISTS")
+    (is (= 193 interpreted))
+    (is (= interpreted compiled)))
+  (is (= 500011500027
+         (parse-integer (run-c (sheaf:assign-stacks (lowered-from "alternating-loops" "BIG-LISTS"))
+                               "-DSHEAF_STACK_SIZE=4096")))))

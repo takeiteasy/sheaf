@@ -58,6 +58,13 @@
 (defun resizable-node-p (node)
   (eq (size-class (ir-node-type node)) :resizable))
 
+(defun holds-array-p (type &optional seen)
+  "Whether a value of TYPE is, or holds, an array, slice or reference."
+  (and (not (member type seen))
+       (case (ir-type-kind type)
+         ((:storage :view) t)
+         (:data (some (lambda (field) (holds-array-p field (cons type seen))) (field-types type))))))
+
 (defun holds-growable-p (type &optional seen)
   "Whether a value of TYPE is, or holds, a growable value, which a bank hands a slice to."
   (and (not (member type seen))
@@ -423,7 +430,7 @@ effects from TABLE."
                     (bank (ir-prim-bank node))
                     (when (stores-storage-p node) (setf (effects-stores effects) t)))
                    (ir-call (stacks (list* (ir-call-destination node) (ir-call-region node) (ir-call-spare node)
-                                            (ir-call-growables node)))
+                                            (ir-call-copy node) (ir-call-growables node)))
                     (bank (ir-call-bank node))
                     (def (ir-call-function node)))
                    (ir-let (stacks (ir-let-stacks node))
@@ -601,19 +608,26 @@ slice built in it."
                                 (error "~s keeps a growable local across a call back into its recursive cycle: https://github.com/takeiteasy/sheaf/issues/17"
                                        (ir-def-name def)))
                               (setf (ir-call-reset copy) (iteration-resets def node region spare bank))
-                              (if (and spare (gethash node *swaps*))
-                                  (if dest
-                                      (error "~s switches regions in a cycle whose result holds storage" (ir-def-name def))
-                                      (clone-def callee dest stacks call-bank spare region entry-busy))
-                                  (clone-def callee dest stacks call-bank region spare entry-busy)))
+                              (cond ((and spare (gethash node *swaps*))
+                                     (let ((next (and dest spare)))
+                                       (when (and dest (/= dest region))
+                                         (error "~s switches regions but builds its result outside them" (ir-def-name def)))
+                                       (setf (ir-call-destination copy) next)
+                                       (clone-def callee next stacks call-bank spare region entry-busy)))
+                                    (t (clone-def callee dest stacks call-bank region spare entry-busy))))
                              (callee-cycle
-                              (let* ((own-region (and (null dest) (cdr callee-cycle) (take-index busy)))
+                              (let* ((copy-out (and dest (gethash callee *alternating*)
+                                                    (not (holds-array-p (ir-node-type node)))))
+                                     (own-region (and (or (null dest) copy-out) (cdr callee-cycle) (take-index busy)))
                                      (own-spare (and own-region (gethash callee *alternating*)
                                                      (take-index (with-index busy own-region))))
-                                     (callee-region (or dest own-region)))
+                                     (callee-region (if copy-out own-region (or dest own-region)))
+                                     (callee-dest (if copy-out own-region dest)))
                                 (setf (ir-call-region copy) own-region
-                                      (ir-call-spare copy) own-spare)
-                                (clone-def callee dest stacks call-bank callee-region own-spare
+                                      (ir-call-spare copy) own-spare
+                                      (ir-call-destination copy) callee-dest
+                                      (ir-call-copy copy) (and copy-out dest))
+                                (clone-def callee callee-dest stacks call-bank callee-region own-spare
                                            (with-index (with-index busy callee-region) own-spare))))
                              (t (clone-def callee dest stacks call-bank nil nil busy))))
                  copy))
@@ -768,6 +782,8 @@ stack below its stack count. Returns T."
                                  (check-index (ir-call-region node) "a call's region"))
                                (when (ir-call-spare node)
                                  (check-index (ir-call-spare node) "a call's spare region"))
+                               (when (ir-call-copy node)
+                                 (check-index (ir-call-copy node) "a call's copy"))
                                (loop :for (nil index) :in (ir-call-reset node)
                                      :do (check-index index "a call's reset")))
                       (ir-prim (cond ((ir-prim-bank node)

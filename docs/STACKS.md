@@ -105,6 +105,14 @@ parameter along with what it built keeps both regions, as `accumulate` does:
 [#33](https://github.com/takeiteasy/sheaf/issues/33). So does one with a `catch`
 or `protect`: [#32](https://github.com/takeiteasy/sheaf/issues/32).
 
+A loop that returns storage builds it in the two regions and copies the result
+into the caller's destination when it returns[^copy]:
+
+```lisp
+(define (rebuild-list n xs)                      ; the list it returns is copied out
+  (if (== n 0) xs (rebuild-list (- n 1) (Cons n Nil))))
+```
+
 A loop that builds growable values in a bank gives their slices back the same
 way, when its arguments reach none of them[^slices]:
 
@@ -148,6 +156,7 @@ VECTORS-DOWN<UFIX → LIST (VECTOR UFIX)>{12}[dest 1 bank 2 busy 0 1 2]
 | `ir-call-bank` | The bank a result's growable values are built from |
 | `ir-call-region` | A region the call takes and frees |
 | `ir-call-spare` | The second region a call into a loop that alternates takes and frees |
+| `ir-call-copy` | The stack a call into a loop that returns storage copies its result to |
 | `ir-call-reset` | What a tail call frees before it jumps, each `(:stack index)` back to where its iteration began, `(:bank index)` likewise, or `(:spare index)`, the region the next iteration builds in, back to where it was when the loop was entered |
 | `ir-let-stacks` | The stacks the growable values a `let` binds own |
 | `ir-let-bank` | The bank a `let` owns for a result it drops |
@@ -176,8 +185,11 @@ freed.
 - A cycle keeps what it allocates until the call into it returns, unless a
   tail call frees it each iteration:
   [#29](https://github.com/takeiteasy/sheaf/issues/29).
-- A loop whose result holds storage keeps all it builds:
-  [#30](https://github.com/takeiteasy/sheaf/issues/30).
+- A loop whose result holds a `Cell`, array or `Vector` keeps all it builds:
+  [#35](https://github.com/takeiteasy/sheaf/issues/35).
+- Copying a loop's result visits a shared cell once for each path to it and calls
+  itself once for each cell on a path:
+  [#34](https://github.com/takeiteasy/sheaf/issues/34).
 - A loop that passes on both what it built and a changing parameter keeps all
   it builds: [#33](https://github.com/takeiteasy/sheaf/issues/33).
 - A loop with a `catch` or `protect` keeps all it builds:
@@ -219,8 +231,12 @@ freed.
     which holds only what the previous iteration built, and jumps to the clone
     that builds in it. The interpreter frees the cells above what the spare held
     when it was taken, and C saves its top when the cycle is entered
-    ([EMITTER.md](EMITTER.md#calls)). A loop whose result holds no storage
-    alternates; the result of one that does is built in the caller's destination.
+    ([EMITTER.md](EMITTER.md#calls)).
+[^copy]: The call into the loop builds in its own two regions, and the clone's
+    destination is the region it builds in. Before the call frees them it copies
+    each cell of the result on either region to the caller's destination, and
+    shares every other. A result that holds a `Cell`, array or `Vector` is built
+    in the destination as before.
 [^region]: A cycle of functions whose results hold no storage and that build
     no cells or arrays takes no region. Growable values go on stacks of their
     own, so a cycle that builds only those takes none either.

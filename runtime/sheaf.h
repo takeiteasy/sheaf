@@ -122,6 +122,12 @@ static SHEAF_UNUSED void *sheaf_push(sheaf_stack *stack, size_t size, size_t ali
     return (void *)top;
 }
 
+/* Whether P lies on the stack A or the stack B, the regions a loop built its result in. */
+static SHEAF_UNUSED int sheaf_in_regions(const sheaf_stack *a, const sheaf_stack *b, const void *p) {
+    return ((const char *)p >= a->base && (const char *)p < a->limit)
+        || ((const char *)p >= b->base && (const char *)p < b->limit);
+}
+
 static SHEAF_UNUSED uint64_t sheaf_index(uint64_t index, uint64_t length) {
     if (index >= length) {
         fprintf(stderr, "the index %llu is outside the array of %llu elements\n",

@@ -165,6 +165,26 @@ stacks and banks it saves, each with what it held on entry."
                  (unless (stack-owned stack)
                    (error "A cell was pushed to stack ~d, which has no owner" index))
                  (push cell (stack-items stack))))
+             (copy-out (value regions destination)
+               "VALUE with each cell on a stack in REGIONS copied to the stack DESTINATION.
+               A cell on any other stack is shared, since nothing in it can point into REGIONS."
+               ;; TODO: shared cells are copied once for each path to them
+               ;; https://github.com/takeiteasy/sheaf/issues/34
+               (if (and (datum-p value) (not (storage-p value)))
+                   (let ((stack (datum-stack value)))
+                     (cond ((null stack)
+                            (make-datum (datum-constructor value)
+                                        (mapcar (lambda (field) (copy-out field regions destination))
+                                                (datum-fields value))))
+                           ((member stack regions)
+                            (let ((cell (make-datum (datum-constructor value)
+                                                    (mapcar (lambda (field) (copy-out field regions destination))
+                                                            (datum-fields value))
+                                                    destination)))
+                              (push-cell destination cell)
+                              cell))
+                           (t value)))
+                   value))
              (live (value what)
                (let ((owner (typecase value
                               (datum value)
@@ -343,6 +363,7 @@ stacks and banks it saves, each with what it held on entry."
                                     :collect (cons name (evaluate arg env))))
                          (region (ir-call-region node))
                          (spare (ir-call-spare node))
+                         (copy (ir-call-copy node))
                          (reset (ir-call-reset node)))
                     (when (and stacks reset)
                       (give-back-since (loop :for entry :in reset
@@ -351,7 +372,10 @@ stacks and banks it saves, each with what it held on entry."
                                                           (find entry *iteration-marks* :key #'butlast :test #'equal)))))
                     (when region (claim region))
                     (when spare (claim spare))
-                    (unwind-protect (enter def env)
+                    (unwind-protect (let ((value (enter def env)))
+                                      (if copy
+                                          (copy-out value (list region spare) copy)
+                                          value))
                       (when spare (release spare))
                       (when region (release region)))))
                  (ir-construct

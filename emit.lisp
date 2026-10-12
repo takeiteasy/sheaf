@@ -17,6 +17,7 @@
 (defvar *def-tail-calls*)
 (defvar *def-cycle*)
 (defvar *aux* '() "The functions that expressions need defined before the defs, newest first.")
+(defvar *copies* nil "The types whose values a call copies out of the regions of a loop.")
 
 (defun emit-error (control &rest args)
   (let ((location (and *emit-def* (ir-def-location *emit-def*))))
@@ -497,6 +498,25 @@ returns the expression."
                                                   ,arg)))))
         (values (tagged-literal type tag args) '()))))
 
+(defun copy-needed-p (type &optional seen)
+  "Whether copying a value of TYPE follows a cell."
+  (and (eq (ir-type-kind type) :data)
+       (not (member type seen))
+       (or (pooled-p type)
+           (some (lambda (field) (copy-needed-p field (cons type seen))) (field-types type)))))
+
+(defun copy-name (type)
+  (format nil "copy_~a" (struct-name type)))
+
+(defun copy-call (type value node)
+  "A call of the function that copies VALUE, of TYPE, from the regions of the call
+NODE to the stack it copies to."
+  (setf (gethash type *copies*) t)
+  `(:call ,(copy-name type) ,value
+          (:addr ,(stack-node (ir-call-region node)))
+          (:addr ,(stack-node (ir-call-spare node)))
+          (:addr ,(stack-node (ir-call-copy node)))))
+
 (defun call-expr (node env)
   "A C expression for the call NODE, and the statements it needs first."
   (let ((call `(:call ,(c-name (ir-call-function node))
@@ -510,6 +530,8 @@ returns the expression."
                                 :for mark :in marks
                                 :collect (mark-declaration :stack index mark))
                           (list `(:decl ,(c-type (ir-node-type node)) ,result ,call))
+                          (when (ir-call-copy node)
+                            (list `(:assign ,(var result) ,(copy-call (ir-node-type node) (var result) node))))
                           (emit-releases (loop :for index :in owned
                                                :for mark :in marks
                                                :collect (list :stack index mark))))))
@@ -990,6 +1012,60 @@ or protects."
              defs)
     (values (nreverse types) handlers)))
 
+(defun copy-definition (type)
+  "The C function that copies a value of TYPE, from the regions A and B to the
+stack TO: a cell on either is copied, and any other is shared."
+  ;; TODO: the copy visits a shared cell once for each path to it, and calls itself once for each cell on a path
+  ;; https://github.com/takeiteasy/sheaf/issues/34
+  (let* ((pooled (pooled-p type))
+         (struct `(:struct ,(struct-name type)))
+         (source (if pooled "p" "value"))
+         (target (if pooled "cell" "out"))
+         (stack '(:ptr (:name "sheaf_stack")))
+         (copies (loop :for constructor :in (lowered-constructors *lowered* type)
+                       :for tag := (ir-constructor-tag constructor)
+                       :for fields := (loop :for field :in (ir-constructor-fields constructor)
+                                            :for i :from 0
+                                            :when (copy-needed-p field)
+                                              :collect (let ((member (list "u" (format nil "c~d" tag) (format nil "f~d" i))))
+                                                         `(:assign ,(apply #'member-access (var target) type member)
+                                                                   (:call ,(copy-name field)
+                                                                          ,(apply #'member-access (var source) type member)
+                                                                          ,(var "a") ,(var "b") ,(var "to")))))
+                       :when fields
+                         :collect `(:if (:== ,(member-access (var source) type "tag") (:int ,tag)) ,fields))))
+    `(:fn ,(c-type type) ,(copy-name type)
+          ((,(c-type type) ,source) (,stack "a") (,stack "b") (,stack "to"))
+          ,(if pooled
+               `((:if (:== (:call "sheaf_in_regions" ,(var "a") ,(var "b") ,(var source)) (:int 0))
+                      ((:return ,(var source))))
+                 (:decl (:ptr ,struct) "cell" (:call "sheaf_push" ,(var "to") (:sizeof ,struct) (:alignof ,struct)))
+                 (:assign (:deref ,(var "cell")) (:deref ,(var source)))
+                 ,@copies
+                 (:return ,(var "cell")))
+               `((:decl ,(c-type type) "out" ,(var source))
+                 ,@copies
+                 (:return ,(var "out")))))))
+
+(defun copy-definitions ()
+  "The prototypes and definitions of the functions that copy the types in `*copies*`
+and the types they hold."
+  (let ((types '())
+        (pending (loop :for type :being :the :hash-keys :of *copies* :collect type)))
+    (loop :while pending
+          :do (let ((type (pop pending)))
+                (unless (member type types)
+                  (push type types)
+                  (dolist (field (field-types type))
+                    (when (copy-needed-p field)
+                      (push field pending))))))
+    (setf types (sort types #'< :key (lambda (type) (gethash type *c-types*))))
+    (let ((stack '(:ptr (:name "sheaf_stack"))))
+      (append (loop :for type :in types
+                    :collect `(:proto ,(c-type type) ,(copy-name type) ,(c-type type) ,stack ,stack ,stack))
+              (loop :for type :in types
+                    :append (list (copy-definition type) '(:blank)))))))
+
 (defun exception-definitions (types)
   "The C struct that holds the value being thrown, a union of the exception TYPES."
   `((:struct-def "sheaf_exception"
@@ -1011,6 +1087,7 @@ or protects."
         (*def-tail-calls* (make-hash-table :test 'eq))
         (*def-cycle* (make-hash-table :test 'eq))
         (*aux* '())
+        (*copies* (make-hash-table :test 'eq))
         (defs (lowered-defs assigned))
         (stacks (max 1 (lowered-stack-count assigned)))
         (exception-types '())
@@ -1038,7 +1115,8 @@ or protects."
                                              (emit-cycle (mapcar (lambda (member) (gethash member defs))
                                                                  cycle)))))))
            (main (emit-main assigned))
-           (types (type-definitions assigned)))
+           (types (type-definitions assigned))
+           (copies (copy-definitions)))
       `((:comment "Generated by Sheaf.")
         (:include "sheaf.h")
         (:blank)
@@ -1052,6 +1130,7 @@ or protects."
         (:decl (:name "sheaf_bank") "sheaf_banks" nil :static t :array ,stacks :unused t)
         (:blank)
         ,@(when handlers (exception-definitions exception-types))
+        ,@copies
         ,@prototypes
         (:blank)
         ,@(loop :for function :in (reverse *aux*) :append `(,function (:blank)))

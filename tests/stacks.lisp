@@ -7,15 +7,21 @@
 (defvar *assigned* (make-hash-table :test 'equal))
 
 (defun assigned (fixture)
-  "FIXTURE's lowered program with its stacks assigned, once."
+  "FIXTURE's lowered program with its stacks assigned, once. A list of a fixture
+and one of its functions assigns the program that function is the root of."
   (or (gethash fixture *assigned*)
       (setf (gethash fixture *assigned*)
-            (sheaf:assign-stacks (lowered fixture)))))
+            (sheaf:assign-stacks (if (consp fixture)
+                                     (lowered-from (first fixture) (second fixture))
+                                     (lowered fixture))))))
+
+(defun fixture-of (fixture)
+  (if (consp fixture) (first fixture) fixture))
 
 (defun clones (fixture name)
   "The clones in FIXTURE's assigned program of the function NAME."
   (loop :for def :being :the :hash-values :of (sheaf:lowered-defs (assigned fixture))
-        :when (eq (sheaf:ir-def-origin def) (fixture-symbol fixture name))
+        :when (eq (sheaf:ir-def-origin def) (fixture-symbol (fixture-of fixture) name))
           :collect def))
 
 (defun static-clones (fixture name)
@@ -88,7 +94,7 @@
   (find-if (lambda (call)
              (eq (sheaf:ir-def-origin (gethash (sheaf:ir-call-function call)
                                                (sheaf:lowered-defs (assigned fixture))))
-                 (fixture-symbol fixture name)))
+                 (fixture-symbol (fixture-of fixture) name)))
            (calls def)))
 
 (test a-cycle-allocates-in-one-region
@@ -418,6 +424,9 @@ or the functions in CYCLE."
 
 ;;; Loops that alternate between two regions
 
+(defparameter *lists* '("alternating-loops" "MAIN-LISTS")
+  "The program of the loops that return lists.")
+
 (defun spares-freed (fixture name &rest cycle)
   "The spare region each clone of NAME and CYCLE in FIXTURE frees, one for each switching call."
   (loop :for def :in (mapcan (lambda (member) (copy-list (clones fixture member))) (cons name cycle))
@@ -425,16 +434,24 @@ or the functions in CYCLE."
                       :append (loop :for (kind index) :in (sheaf:ir-call-reset call)
                                     :when (eq kind :spare) :collect index))))
 
-(defun entry-regions (fixture name)
-  "The region and spare region RUN's call of NAME in FIXTURE takes."
-  (let ((entry (call-to (first (clones fixture "RUN")) fixture name)))
-    (list (sheaf:ir-call-region entry) (sheaf:ir-call-spare entry))))
+(defun entry-regions (fixture name &optional (root "RUN"))
+  "The region, spare region and copy destination ROOT's call of NAME in FIXTURE takes."
+  (let ((entry (call-to (first (clones fixture root)) fixture name)))
+    (list (sheaf:ir-call-region entry) (sheaf:ir-call-spare entry) (sheaf:ir-call-copy entry))))
 
 (defun alternates-p (fixture name &rest cycle)
   "Whether the call of NAME in RUN builds in two regions in turn, each freed by a switching call."
-  (destructuring-bind (region spare) (entry-regions fixture name)
-    (and (integerp region) (integerp spare) (/= region spare)
+  (destructuring-bind (region spare copy) (entry-regions fixture name)
+    (and (integerp region) (integerp spare) (/= region spare) (null copy)
          (equal (sort (copy-list (apply #'spares-freed fixture name cycle)) #'<)
+                (sort (list region spare) #'<)))))
+
+(defun copies-out-p (root name &rest cycle)
+  "Whether ROOT's call of NAME in the program of MAIN-LISTS builds in two regions in turn and copies its result out."
+  (destructuring-bind (region spare copy) (entry-regions *lists* name root)
+    (and (integerp region) (integerp spare) (integerp copy)
+         (/= region spare) (/= region copy) (/= spare copy)
+         (equal (sort (copy-list (apply #'spares-freed *lists* name cycle)) #'<)
                 (sort (list region spare) #'<)))))
 
 (test a-loop-that-passes-on-what-it-built-builds-in-two-regions-in-turn
@@ -459,3 +476,16 @@ or the functions in CYCLE."
 
 (test alternating-loops-keep-their-results
   (is (= 247 (sheaf:run-lowered (assigned "alternating-loops")))))
+
+(test a-loop-that-returns-storage-copies-it-out-of-its-regions
+  (is-true (copies-out-p "RUN-LISTS" "REBUILD-LIST"))
+  (is-true (copies-out-p "RUN-LISTS" "THREAD-LIST"))
+  (is-true (copies-out-p "RUN-LISTS" "PING-LIST" "PONG-LIST"))
+  (is-true (copies-out-p "PAIR-TOTAL" "PAIR-UP")))
+
+(test a-loop-that-returns-an-array-has-one-region
+  (is (null (second (entry-regions *lists* "SPIN-ARRAY" "RUN-LISTS"))))
+  (is (null (spares-freed *lists* "SPIN-ARRAY"))))
+
+(test loops-that-copy-out-keep-their-results
+  (is (= 193 (sheaf:run-lowered (sheaf:assign-stacks (lowered-from "alternating-loops" "MAIN-LISTS"))))))
