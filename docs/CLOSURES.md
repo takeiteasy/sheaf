@@ -76,7 +76,7 @@ of the construct.
 - A closure nested inside closures to a depth known only at runtime, such as
   an iterator rebuilt in a loop, is an error:
   [#11](https://github.com/takeiteasy/sheaf/issues/11).
-- Partial application and the `for`, `block` and `return-from` forms are errors:
+- The `for`, `block` and `return-from` forms are errors:
   [#10](https://github.com/takeiteasy/sheaf/issues/10). Keyword arguments, `dynamic-let` and
   multiple values are errors too: [#37](https://github.com/takeiteasy/sheaf/issues/37),
   [#38](https://github.com/takeiteasy/sheaf/issues/38), [#39](https://github.com/takeiteasy/sheaf/issues/39).
