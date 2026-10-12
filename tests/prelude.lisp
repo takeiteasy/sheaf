@@ -81,6 +81,20 @@
                            (lambda ()
                              (sheaf:assign-stacks (lowered-from "returns-rejected" "MAIN-GROWN")))))))
 
+(test loops-run-on-every-tier
+  (let ((expected (run-on-sbcl "for-loops")))
+    (is (= 500 expected))
+    (is (zerop (count-ir (lowered "for-loops") 'sheaf:ir-foreign)))
+    (is (plusp (count-ir (lowered "for-loops") 'sheaf:ir-loop)))
+    (is (= expected (sheaf:run-lowered (lowered "for-loops"))))
+    (is (= expected (sheaf:run-lowered (assigned "for-loops"))))))
+
+(test a-break-out-of-a-catch-or-a-rebuilt-growable-variable-is-an-error
+  (is (search "issues/40" (error-message (lambda () (lowered-from "for-rejected" "MAIN-BREAK")))))
+  (is (search "issues/41" (error-message
+                           (lambda ()
+                             (sheaf:assign-stacks (lowered-from "for-rejected" "MAIN-REBUILT")))))))
+
 (test cells-give-one-result-on-every-tier
   (let ((expected (run-on-sbcl "cells")))
     (is (= 29 expected))

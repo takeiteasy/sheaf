@@ -50,6 +50,12 @@ and exit code."
   (let ((program (sheaf:c-program (assigned "mutual-tail"))))
     (is (= 5 (length (nodes-of program :label))))))
 
+(test an-exit-out-of-a-loop-gives-back-what-the-iteration-built
+  (is (= 19986 (c-result "loop-exits")))
+  (multiple-value-bind (output errors code) (run-c (assigned "loop-exits") "-DSHEAF_STACK_SIZE=4096")
+    (is (zerop code) "~a" errors)
+    (is (= 19986 (parse-integer output)))))
+
 (test an-exhausted-data-stack-aborts
   (multiple-value-bind (output errors code) (run-c (assigned "tail") "-DSHEAF_STACK_SIZE=4096")
     (declare (ignore output))
@@ -97,6 +103,7 @@ and exit code."
   (is (= 19 (c-result "stdlib")))
   (is (= 5 (c-result "voids")))
   (is (= 224 (c-result "returns")))
+  (is (= 500 (c-result "for-loops")))
   (is (= 53 (c-result "vectors"))))
 
 (test growables-match-the-interpreter-in-c

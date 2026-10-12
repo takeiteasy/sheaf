@@ -69,6 +69,8 @@
    #:ir-foreign #:ir-foreign-vars #:ir-foreign-form
    #:ir-match #:ir-match-scrutinee #:ir-match-branches
    #:ir-branch #:ir-branch-pattern #:ir-branch-body
+   #:ir-loop #:ir-loop-label #:ir-loop-vars #:ir-loop-inits #:ir-loop-test #:ir-loop-steps #:ir-loop-body #:ir-loop-returns
+   #:ir-break #:ir-continue
    #:ir-block #:ir-block-label #:ir-block-body #:ir-return #:ir-return-label #:ir-return-value
    #:ir-throw #:ir-throw-value
    #:ir-catch #:ir-catch-body #:ir-catch-branches #:ir-catch-busy #:ir-catch-marks #:ir-catch-bank-marks

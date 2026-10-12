@@ -837,6 +837,78 @@ label that a return out of it jumps to."
             ,@(emit-releases (ldiff *releases* releases))
             (:goto ,end))))))
 
+(defun emit-loop-steps (node vars env)
+  "The statements that give each loop variable of NODE with a step its next
+value: all at once, or one after another in a `for*`."
+  (let ((steps (loop :for (nil c-name type) :in vars
+                     :for step :in (ir-loop-steps node)
+                     :when step :collect (list c-name type step))))
+    (if (ir-loop-sequential node)
+        (loop :for (c-name nil step) :in steps
+              :collect `(:block ,@(emit-node step c-name env)))
+        (let ((temps (loop :for (c-name type step) :in steps
+                           :collect (list c-name (fresh-c-name (make-symbol "NEXT")) type step))))
+          `((:block
+              ,@(loop :for (nil temp type step) :in temps
+                      :append `((:decl ,(c-type type) ,temp nil :unused t)
+                                ,@(emit-node step temp env)))
+              ,@(loop :for (c-name temp) :in temps
+                      :collect `(:assign ,(var c-name) ,(var temp)))))))))
+
+(defun emit-loop (node target env)
+  "The statements that compute the loop NODE into TARGET: the variables, then its
+test, body and steps again and again until the test or a break leaves, then its result."
+  (let* ((top (fresh-c-name (make-symbol "LOOP")))
+         (done (fresh-c-name (make-symbol "DONE")))
+         (step (fresh-c-name (make-symbol "STEP")))
+         (done-used (list nil))
+         (step-used (list nil))
+         (vars (loop :for (name . type) :in (ir-loop-vars node)
+                     :collect (list name (fresh-c-name name) type)))
+         (inner (append (loop :for (name c-name) :in vars :collect (cons name c-name)) env))
+         (test (ir-loop-test node))
+         (*emit-exits* (acons (ir-loop-label node)
+                              (list :loop done step *releases* done-used step-used)
+                              *emit-exits*))
+         (test-statements
+           (when test
+             (let* ((result (fresh-c-name (make-symbol "TEST")))
+                    (type (ir-node-type test))
+                    (exit (ir-constructor-tag (named-constructor *lowered* type
+                                                                 (if (eq (ir-loop-exit-on node) :true) "TRUE" "FALSE")))))
+               (setf (first done-used) t)
+               `((:block
+                   (:decl ,(c-type type) ,result nil :unused t)
+                   ,@(emit-node test result inner)
+                   (:if (:== (:dot ,(var result) "tag") (:int ,exit)) ((:goto ,done))))))))
+         (discarded (fresh-c-name (make-symbol "DISCARDED")))
+         (body `((:block
+                   (:decl ,(c-type (ir-node-type (ir-loop-body node))) ,discarded nil :unused t)
+                   ,@(emit-node (ir-loop-body node) discarded inner))))
+         (steps (emit-loop-steps node vars inner)))
+    `((:block
+        ,@(loop :for (nil c-name type) :in vars
+                :for init :in (ir-loop-inits node)
+                :collect `(:decl ,(c-type type) ,c-name ,(atom-expr init env) :unused t))
+        (:label ,top)
+        ,@test-statements
+        ,@body
+        ,@(when (first step-used) `((:label ,step)))
+        ,@steps
+        (:goto ,top)
+        ,@(when (first done-used) `((:label ,done)))
+        ,@(emit-node (ir-loop-returns node) target inner)))))
+
+(defun emit-loop-exit (node)
+  "The statements of the break or continue NODE: give back what was taken since
+its loop's iteration began, then jump."
+  (let ((breakp (ir-break-p node)))
+    (destructuring-bind (done step releases done-used step-used)
+        (cddr (assoc (if breakp (ir-break-label node) (ir-continue-label node)) *emit-exits*))
+      (setf (first (if breakp done-used step-used)) t)
+      `(,@(emit-releases (ldiff *releases* releases))
+        (:goto ,(if breakp done step))))))
+
 (defun emit-node (node target env)
   "The statements that compute NODE into TARGET, a C variable or `:return`."
   (etypecase node
@@ -852,6 +924,8 @@ label that a return out of it jumps to."
             (unless (eq target :return)
               (emit-releases owned)))))))
     (ir-block (emit-block node target env))
+    (ir-loop (emit-loop node target env))
+    ((or ir-break ir-continue) (emit-loop-exit node))
     (ir-return (emit-block-return node env))
     (ir-match (emit-match node target env))
     (ir-throw (emit-throw node env))

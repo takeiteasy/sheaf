@@ -76,10 +76,10 @@ of the construct.
 - A closure nested inside closures to a depth known only at runtime, such as
   an iterator rebuilt in a loop, is an error:
   [#11](https://github.com/takeiteasy/sheaf/issues/11).
-- The `for` forms are errors:
-  [#10](https://github.com/takeiteasy/sheaf/issues/10). Keyword arguments, `dynamic-let` and
-  multiple values are errors too: [#37](https://github.com/takeiteasy/sheaf/issues/37),
-  [#38](https://github.com/takeiteasy/sheaf/issues/38), [#39](https://github.com/takeiteasy/sheaf/issues/39).
+- Keyword arguments, `dynamic-let` and multiple values are errors:
+  [#37](https://github.com/takeiteasy/sheaf/issues/37),
+  [#38](https://github.com/takeiteasy/sheaf/issues/38),
+  [#39](https://github.com/takeiteasy/sheaf/issues/39).
 - `handle`, `resumable` and `resume-to` are errors:
   [#24](https://github.com/takeiteasy/sheaf/issues/24).
 - A `Cell` captured by only one closure stays a separate value, not a field of

@@ -79,8 +79,14 @@ branch ends. REACHED holds the locals the result holds."
                  (ir-match
                   (dolist (branch (ir-match-branches node))
                     (collect (ir-branch-body branch) (1+ depth) owner)))
-                 ((or ir-throw ir-return) nil)
+                 ((or ir-throw ir-return ir-break ir-continue) nil)
                  (ir-block (collect (ir-block-body node) depth owner))
+                 (ir-loop
+                  (when (ir-loop-test node) (collect (ir-loop-test node) (1+ depth) owner))
+                  (dolist (step (ir-loop-steps node))
+                    (when step (collect step (1+ depth) owner)))
+                  (collect (ir-loop-body node) (1+ depth) owner)
+                  (collect (ir-loop-returns node) depth owner))
                  (ir-catch
                   (dolist (body (cons (ir-catch-body node) (mapcar #'ir-catch-branch-body (ir-catch-branches node))))
                     (collect body (1+ depth) owner)))
@@ -170,6 +176,8 @@ is true a store that no caller could make safe is an error."
                    (ir-match (walk-match node env depth owner))
                    (ir-throw '())
                    (ir-block (walk-block node env depth owner))
+                   (ir-loop (walk-loop node env depth owner))
+                   ((or ir-break ir-continue) '())
                    (ir-return (walk-return node env depth owner))
                    (ir-catch (walk-catch node env depth owner))
                    (ir-protect (walk-protect node env depth owner)))))
@@ -284,6 +292,44 @@ REPORT is true, notes that they must not outlive what BODY frees."
                  (setf (gethash label returned) (list '() depth))
                  (merge-roots (walk (ir-block-body node) env depth owner)
                               (first (gethash label returned)))))
+             (walk-loop (node env depth owner)
+               (let* ((vars (ir-loop-vars node))
+                      (inits (mapcar (lambda (init) (walk init env depth owner)) (ir-loop-inits node)))
+                      (roots inits)
+                      (inner env))
+                 (loop :for (name . type) :in vars
+                       :do (setf (gethash name depths) depth
+                                 (gethash name growable-lets) (holds-growable-p type)
+                                 (gethash name origins) (list (format nil "the loop variable of type ~a" (type-text type))
+                                                              *here*)))
+                 (loop :for changed := nil
+                       :do (setf inner env)
+                           (loop :for (name . nil) :in vars
+                                 :for var-roots :in roots
+                                 :do (setf inner (acons name var-roots inner)))
+                           (let ((next (loop :for (name . type) :in vars
+                                             :for step :in (ir-loop-steps node)
+                                             :for init :in inits
+                                             :collect (merge-roots
+                                                       init
+                                                       (and step (holds-storage-p type)
+                                                            (let ((stepped (walk step inner (1+ depth) name)))
+                                                              (when report
+                                                                (push (list stepped depth
+                                                                            (list (list def-name (format nil "the loop variable of type ~a" (type-text type))
+                                                                                        (or (ir-node-location step) *here*))
+                                                                                  (entry "the loop that carries it")))
+                                                                      branches))
+                                                              stepped))))))
+                             (setf changed (notevery (lambda (a b) (null (set-exclusive-or a b))) next roots)
+                                   roots next))
+                       :while changed)
+                 (loop :for (name . nil) :in vars
+                       :for var-roots :in roots
+                       :do (setf (gethash name locals) var-roots))
+                 (when (ir-loop-test node) (walk (ir-loop-test node) inner (1+ depth) owner))
+                 (walk (ir-loop-body node) inner (1+ depth) owner)
+                 (walk (ir-loop-returns node) inner depth owner)))
              (walk-return (node env depth owner)
                (let ((roots (walk (ir-return-value node) env depth owner))
                      (target (gethash (ir-return-label node) returned)))

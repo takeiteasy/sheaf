@@ -120,6 +120,9 @@ A function may return a reference into an array it builds, and the array may
 hold references into its other locals: whatever the result reaches is built in
 the caller's destinations ([STACKS.md](STACKS.md)).
 
+A loop variable has the roots of its initial value and of each step, and a step
+cannot carry a growable local of its iteration into the next one.
+
 A return out of a block gives the block's result the roots of what it returns,
 and a reference to a growable value freed by a branch cannot leave that branch by
 a return either.

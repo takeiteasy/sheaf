@@ -48,6 +48,9 @@
 (defstruct ir-branch pattern body)
 (defstruct (ir-block (:include ir-node)) label body)
 (defstruct (ir-return (:include ir-node)) label value)
+(defstruct (ir-loop (:include ir-node)) label vars inits sequential test exit-on steps body returns)
+(defstruct (ir-break (:include ir-node)) label)
+(defstruct (ir-continue (:include ir-node)) label)
 (defstruct (ir-throw (:include ir-node)) value)
 (defstruct (ir-catch (:include ir-node)) body branches (busy '()) (marks '()) (bank-marks '()))
 (defstruct ir-catch-branch type pattern body)
@@ -88,7 +91,7 @@ reaches, and its root."
   "Call FUNCTION on NODE and on every node inside it, outermost first."
   (funcall function node)
   (etypecase node
-    ((or ir-literal ir-local ir-global ir-foreign))
+    ((or ir-literal ir-local ir-global ir-foreign ir-break ir-continue))
     (ir-let (walk-ir function (ir-let-value node))
             (walk-ir function (ir-let-body node)))
     ((or ir-call ir-construct ir-prim)
@@ -102,6 +105,12 @@ reaches, and its root."
                 (walk-ir function (ir-branch-body branch))))
     (ir-block (walk-ir function (ir-block-body node)))
     (ir-return (walk-ir function (ir-return-value node)))
+    (ir-loop (mapc (lambda (init) (walk-ir function init)) (ir-loop-inits node))
+             (when (ir-loop-test node) (walk-ir function (ir-loop-test node)))
+             (dolist (step (ir-loop-steps node))
+               (when step (walk-ir function step)))
+             (walk-ir function (ir-loop-body node))
+             (walk-ir function (ir-loop-returns node)))
     (ir-throw (walk-ir function (ir-throw-value node)))
     (ir-catch (walk-ir function (ir-catch-body node))
               (dolist (branch (ir-catch-branches node))
@@ -143,6 +152,12 @@ reaches, and its root."
 
 (defvar *return-targets* '()
   "The blocks being lowered, innermost first: a name, its label and the handler depth it is at.")
+
+(defvar *loop-labels* '()
+  "The loop bodies being lowered, innermost first: a name, its label and the handler depth it is at.")
+
+(defvar *renames* '()
+  "The names of the loop variables a later initial value of a `for*` refers to, each with the local that holds its initial value.")
 
 (defvar *exit-labels* '()
   "The labels of the blocks the node being checked is inside.")
@@ -281,7 +296,7 @@ reaches, and its root."
           ((lowered-global-p name)
            (make-ir-global :name name :type type :location *location*))
           ((typep node 'ast:node-local-variable)
-           (make-ir-local :name name :type type :location *location*))
+           (make-ir-local :name (or (cdr (assoc name *renames*)) name) :type type :location *location*))
           (t (lowering-error "the reference to ~s, which is not specialized" name)))))
 
 (defun literal-fit (name value)
@@ -368,6 +383,78 @@ for a branch that catches every exception."
                    :branches (mapcar #'lower-catch-branch (ast:node-catch-branches node))
                    :type (lower-type (ast:node-type node)) :location *location*)))
 
+(defun unit-node ()
+  (make-ir-construct :constructor 'coalton:unit :args '() :type (lower-type tc:*unit-type*)
+                     :location *location*))
+
+(defun lower-discarded (node)
+  "The body that computes NODE, binds its value and gives Unit, for code run for its effects."
+  (let ((*bindings* '()))
+    (emit (make-symbol "_") (lower-simple node))
+    (wrap-bindings (unit-node))))
+
+(defun lower-for (node)
+  (let* ((bindings (ast:node-for-bindings node))
+         (names (mapcar #'ast:node-for-binding-name bindings))
+         (kind (ast:node-for-termination-kind node))
+         (termination (ast:node-for-termination-expr node))
+         (label (make-symbol (symbol-name (ast:node-for-label node))))
+         (counter (and (eq kind :repeat) (make-symbol "REPEAT")))
+         (renames '())
+         (inits '())
+         (vars (loop :for binding :in bindings
+                     :collect (cons (ast:node-for-binding-name binding)
+                                    (lower-type (ast:node-for-binding-type binding))))))
+    (flet ((bound-init (name node)
+             (let* ((simple (let ((*renames* renames)) (lower-simple node)))
+                    (local (make-symbol (symbol-name name))))
+               (emit local simple)
+               (make-ir-local :name local :type (ir-node-type simple) :location (ir-node-location simple)))))
+      (dolist (binding bindings)
+        (unless (ast:node-for-sequential-p node)
+          (when (intersection names (referenced-names (ast:node-for-binding-init binding)))
+            (lowering-error "a loop variable initialized from another one")))
+        (let ((init (bound-init (ast:node-for-binding-name binding) (ast:node-for-binding-init binding))))
+          (push (cons (ast:node-for-binding-name binding) (ir-local-name init)) renames)
+          (push init inits)))
+      (when counter
+        (let ((init (bound-init counter termination)))
+          (push init inits)
+          (setf vars (append vars (list (cons counter (ir-node-type init)))))))
+      (setf inits (nreverse inits))
+      (let* ((count-type (and counter (cdr (car (last vars)))))
+             (count (and counter (make-ir-local :name counter :type count-type :location *location*)))
+             (steps (append (loop :for binding :in bindings
+                                  :collect (and (ast:node-for-binding-step binding)
+                                                (lower-body (ast:node-for-binding-step binding))))
+                            (and counter
+                                 (list (make-ir-prim :op :sub :type count-type :location *location*
+                                                     :args (list count (make-ir-literal :value 1 :type count-type
+                                                                                        :location *location*)))))))
+             (test (cond (counter
+                          (make-ir-prim :op :eq :type (lower-type tc:*boolean-type*) :location *location*
+                                        :args (list count (make-ir-literal :value 0 :type count-type
+                                                                           :location *location*))))
+                         (termination (lower-body termination))))
+             (body (let ((*loop-labels* (acons (ast:node-for-label node) (cons label *handler-depth*) *loop-labels*)))
+                     (lower-discarded (ast:node-for-body node))))
+             (returns (if (ast:node-for-returns node)
+                          (lower-body (ast:node-for-returns node))
+                          (unit-node))))
+        (make-ir-loop :label label :vars vars :inits inits :sequential (ast:node-for-sequential-p node)
+                      :test test :exit-on (if (eq kind :while) :false :true)
+                      :steps steps :body body :returns returns
+                      :type (lower-type (ast:node-type node)) :location *location*)))))
+
+(defun lower-exit (node label maker)
+  "The break or continue NODE of the loop named LABEL, made by MAKER."
+  (let ((target (cdr (assoc label *loop-labels*))))
+    (unless target
+      (lowering-error "a break or continue outside its loop"))
+    (unless (= (cdr target) *handler-depth*)
+      (lowering-error "a break or continue out of a catch or protect: https://github.com/takeiteasy/sheaf/issues/40"))
+    (funcall maker :label (car target) :type (lower-type (ast:node-type node)) :location *location*)))
+
 (defun lower-block (node)
   (let* ((name (ast:node-block-name node))
          (label (make-symbol (symbol-name name)))
@@ -422,14 +509,16 @@ for everything it evaluates first."
          (make-ir-protect :body (lower-body (ast:node-protect-expr node))
                           :cleanup (lower-body (ast:node-protect-cleanup node))
                           :type (lower-type (ast:node-type node)) :location *location*)))
+      (ast:node-for (lower-for node))
+      (ast:node-break (lower-exit node (ast:node-break-label node) #'make-ir-break))
+      (ast:node-continue (lower-exit node (ast:node-continue-label node) #'make-ir-continue))
       (ast:node-block (lower-block node))
       (ast:node-return-from (lower-return node))
       (ast:node-catch (lower-catch node))
       (ast:node-values
        (let ((nodes (ast:node-values-nodes node)))
          (cond ((null nodes)
-                (make-ir-construct :constructor 'coalton:unit :args '()
-                                   :type (lower-type tc:*unit-type*) :location *location*))
+                (unit-node))
                ((null (rest nodes)) (lower-simple (first nodes)))
                (t (lowering-error "multiple values: https://github.com/takeiteasy/sheaf/issues/39")))))
       (ast:node-lisp
@@ -582,6 +671,18 @@ and primitive has its arity, and every operand is an atom. Returns T."
                   (ir-block
                    (let ((*exit-labels* (cons (ir-block-label node) *exit-labels*)))
                      (check (ir-block-body node) scope)))
+                  ((or ir-break ir-continue)
+                   (unless (member (if (ir-break-p node) (ir-break-label node) (ir-continue-label node)) *exit-labels*)
+                     (fail "a break or continue leaves no loop")))
+                  (ir-loop
+                   (dolist (init (ir-loop-inits node)) (check-atom init scope))
+                   (let ((scope (append (mapcar #'car (ir-loop-vars node)) scope)))
+                     (when (ir-loop-test node) (check (ir-loop-test node) scope))
+                     (dolist (step (ir-loop-steps node))
+                       (when step (check step scope)))
+                     (let ((*exit-labels* (cons (ir-loop-label node) *exit-labels*)))
+                       (check (ir-loop-body node) scope))
+                     (check (ir-loop-returns node) scope)))
                   (ir-return
                    (unless (member (ir-return-label node) *exit-labels*)
                      (fail "a return leaves no block"))

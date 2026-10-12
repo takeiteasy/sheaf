@@ -294,6 +294,12 @@ and RET shapes; a value has just RET."
     (ast:node-match (cons (ast:node-match-expr node)
                           (mapcar #'match-branch-body-of (ast:node-match-branches node))))
     (ast:node-throw (list (ast:node-throw-expr node)))
+    (ast:node-for
+     (append (mapcar #'ast:node-for-binding-init (ast:node-for-bindings node))
+             (remove nil (mapcar #'ast:node-for-binding-step (ast:node-for-bindings node)))
+             (remove nil (list (ast:node-for-termination-expr node) (ast:node-for-returns node)))
+             (list (ast:node-for-body node))))
+    ((or ast:node-break ast:node-continue) '())
     (ast:node-block (list (ast:node-block-body node)))
     (ast:node-return-from (list (ast:node-return-from-expr node)))
     (ast:node-protect (list (ast:node-protect-expr node) (ast:node-protect-cleanup node)))
@@ -441,6 +447,8 @@ its sets are then free to differ per use."
     (ast:node-throw
      (infer (ast:node-throw-expr node) env)
      (shape-of (ast:node-type node)))
+    (ast:node-for (infer-for node env))
+    ((or ast:node-break ast:node-continue) (shape-of (ast:node-type node)))
     (ast:node-block
      (let* ((shape (shape-of (ast:node-type node)))
             (*blocks* (acons (ast:node-block-name node) shape *blocks*)))
@@ -456,6 +464,25 @@ its sets are then free to differ per use."
     (ast:node-catch (infer-catch node env))
     (ast:node-lisp (infer-lisp node env))
     (t (unsupported "~(~a~) nodes" (type-of node)))))
+
+(defun infer-for (node env)
+  "The shape of the loop NODE. Each variable's shape is kept under its binding."
+  (let ((inner env))
+    (dolist (binding (ast:node-for-bindings node))
+      (let ((shape (shape-of (ast:node-for-binding-type binding))))
+        (setf (gethash binding *shapes*) shape)
+        (unify-shapes shape (infer (ast:node-for-binding-init binding)
+                                   (if (ast:node-for-sequential-p node) inner env)))
+        (setf inner (acons (ast:node-for-binding-name binding) shape inner))))
+    (dolist (binding (ast:node-for-bindings node))
+      (when (ast:node-for-binding-step binding)
+        (unify-shapes (gethash binding *shapes*) (infer (ast:node-for-binding-step binding) inner))))
+    (when (ast:node-for-termination-expr node)
+      (infer (ast:node-for-termination-expr node) inner))
+    (infer (ast:node-for-body node) inner)
+    (if (ast:node-for-returns node)
+        (infer (ast:node-for-returns node) inner)
+        (shape-of (ast:node-type node)))))
 
 (defun infer-variable (node env)
   (let* ((name (ast:node-variable-value node))
@@ -1400,6 +1427,26 @@ FN is evaluated before ARGS, as in the call it replaces."
       (ast:node-throw
        (ast:make-node-throw :type (funcall ty) :location location
                             :expr (rewrite (ast:node-throw-expr node))))
+      (ast:node-for
+       (flet ((rewritten (node)
+                (and node (rewrite node))))
+         (ast:make-node-for
+          :type (funcall ty) :location location :label (ast:node-for-label node)
+          :bindings (loop :for binding :in (ast:node-for-bindings node)
+                          :collect (ast:make-node-for-binding
+                                    :name (ast:node-for-binding-name binding)
+                                    :type (ctype-ty (materialize (gethash binding *shapes*)))
+                                    :init (rewrite (ast:node-for-binding-init binding))
+                                    :step (rewritten (ast:node-for-binding-step binding))))
+          :sequential-p (ast:node-for-sequential-p node)
+          :returns (rewritten (ast:node-for-returns node))
+          :termination-kind (ast:node-for-termination-kind node)
+          :termination-expr (rewritten (ast:node-for-termination-expr node))
+          :body (rewrite (ast:node-for-body node)))))
+      (ast:node-break
+       (ast:make-node-break :type (funcall ty) :location location :label (ast:node-break-label node)))
+      (ast:node-continue
+       (ast:make-node-continue :type (funcall ty) :location location :label (ast:node-continue-label node)))
       (ast:node-block
        (ast:make-node-block :type (funcall ty) :location location
                             :name (ast:node-block-name node)

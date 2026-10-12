@@ -125,6 +125,22 @@ way, when its arguments reach none of them[^slices]:
 
 A call that passes on a vector it built keeps its slices.
 
+## `for` loops
+
+A `for` loop keeps its variables in the function's frame. A growable local the
+body builds is freed when its iteration ends, by falling through, by `continue`
+or by `break`. A cell a step builds for a variable stays until the function
+ends, or goes in the result's destination if the loop's result holds it.
+
+```lisp
+(for ((i 0 (+ i 1))
+      (xs (the (List UFix) Nil) (Cons i xs)))   ; each cell stays
+  :returns (len xs)
+  :while (< i n)
+  (let ((v (vector:new)))                        ; freed each iteration
+    (vector:push! i v)))
+```
+
 ## Banks
 
 A cycle that builds a growable value at every level, such as `vectors-down`,
@@ -194,6 +210,9 @@ freed.
   it builds: [#33](https://github.com/takeiteasy/sheaf/issues/33).
 - A loop with a `catch` or `protect` keeps all it builds:
   [#32](https://github.com/takeiteasy/sheaf/issues/32).
+- A `for` loop keeps the cells its steps build until its function ends, and a
+  variable holding a `Vector` or `Hashtable` cannot be built anew by a step:
+  [#41](https://github.com/takeiteasy/sheaf/issues/41).
 - A growable local live across a call back into its own cycle is an error:
   [#17](https://github.com/takeiteasy/sheaf/issues/17).
 

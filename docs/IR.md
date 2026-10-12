@@ -42,6 +42,8 @@ bound by a `let` in evaluation order, left to right.
 | `ir-throw` | An atom, an exception to throw ([EXCEPTIONS.md](EXCEPTIONS.md)) |
 | `ir-catch` | A body and branches; a branch holds an exception type and pattern, or neither, and a body |
 | `ir-protect` | A body and a cleanup |
+| `ir-loop` | Variables with initial atoms and steps, a test and which value of it exits, a body run for its effects, and a result |
+| `ir-break`, `ir-continue` | A label; leave the loop, or go to its steps |
 | `ir-block` | A label and a body; a return to the label ends it |
 | `ir-return` | A label and an atom, the value of the block it leaves |
 
@@ -86,11 +88,12 @@ well. An allocating one holds the stack it pushes to in `ir-prim-stack`.
   [#7](https://github.com/takeiteasy/sheaf/issues/7), [#36](https://github.com/takeiteasy/sheaf/issues/36).
 - `Integral`, `Reciprocable`, `Bits` and `Bit` are not primitives:
   [#21](https://github.com/takeiteasy/sheaf/issues/21).
-- A recursive `let` and the `for` forms are errors:
-  [#10](https://github.com/takeiteasy/sheaf/issues/10).
-- A return out of a `catch` or `protect`, and a return of a growable value, are
-  errors: [#40](https://github.com/takeiteasy/sheaf/issues/40),
-  [#43](https://github.com/takeiteasy/sheaf/issues/43).
+- A recursive `let` is an error: [#10](https://github.com/takeiteasy/sheaf/issues/10).
+- A return, break or continue out of a `catch` or `protect`, a return of a
+  growable value and a growable loop variable built anew by a step are errors:
+  [#40](https://github.com/takeiteasy/sheaf/issues/40),
+  [#43](https://github.com/takeiteasy/sheaf/issues/43),
+  [#41](https://github.com/takeiteasy/sheaf/issues/41).
 
 [^foreign]: The standard library mixes raw Lisp with Coalton's own runtime
     representations, such as `Optional` and `Cell`, so a fragment cannot run

@@ -345,6 +345,38 @@ stacks and banks it saves, each with what it held on entry."
                  (if found
                      value
                      (setf (gethash name globals) (enter (global name) '())))))
+             (loop-environment (names cell outer)
+               (append (pairlis names (car cell)) outer))
+             (evaluate-loop (node env)
+               "Evaluate the loop NODE: its body and steps while its test holds, then its result."
+               (let* ((names (mapcar #'car (ir-loop-vars node)))
+                      (break-tag (list nil))
+                      (cell (list (mapcar (lambda (init) (evaluate init env)) (ir-loop-inits node))))
+                      (test (ir-loop-test node))
+                      (exit (and test (constructor-named lowered (ir-node-type test)
+                                                         (if (eq (ir-loop-exit-on node) :true) "TRUE" "FALSE"))))
+                      (final (catch break-tag
+                               (loop
+                                 (let* ((continue-tag (list nil))
+                                        (loop-env (loop-environment names cell env))
+                                        (*exits* (acons (ir-loop-label node)
+                                                        (list continue-tag break-tag names env cell)
+                                                        *exits*)))
+                                   (when (and test (eq exit (datum-constructor (evaluate test loop-env))))
+                                     (throw break-tag loop-env))
+                                   (catch continue-tag (evaluate (ir-loop-body node) loop-env))
+                                   (setf (car cell) (step-values node names (car cell) loop-env)))))))
+                 (evaluate (ir-loop-returns node) final)))
+             (step-values (node names values env)
+               "The values of the loop variables after one iteration, whose variables hold VALUES."
+               (let ((current env))
+                 (loop :for name :in names
+                       :for step :in (ir-loop-steps node)
+                       :for value :in values
+                       :collect (let ((new (if step (evaluate step current) value)))
+                                  (when (and step (ir-loop-sequential node))
+                                    (push (cons name new) current))
+                                  new))))
              (evaluate (node env)
                (etypecase node
                  (ir-literal (ir-literal-value node))
@@ -410,6 +442,14 @@ stacks and banks it saves, each with what it held on entry."
                  (ir-return
                   (throw (cdr (assoc (ir-return-label node) *exits*))
                     (evaluate (ir-return-value node) env)))
+                 (ir-loop (evaluate-loop node env))
+                 (ir-break
+                  (destructuring-bind (continue-tag break-tag names outer cell)
+                      (cdr (assoc (ir-break-label node) *exits*))
+                    (declare (ignore continue-tag))
+                    (throw break-tag (loop-environment names cell outer))))
+                 (ir-continue
+                  (throw (first (cdr (assoc (ir-continue-label node) *exits*))) nil))
                  (ir-throw
                   (let ((value (evaluate (ir-throw-value node) env))
                         (type (ir-node-type (ir-throw-value node))))
