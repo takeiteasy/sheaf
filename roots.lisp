@@ -91,7 +91,7 @@ holds each open block below the def's body with its owner, innermost first."
                  (ir-match
                   (dolist (branch (ir-match-branches node))
                     (collect (ir-branch-body branch) (1+ depth) owner blocks)))
-                 ((or ir-throw ir-return ir-break ir-continue) nil)
+                 ((or ir-throw ir-panic ir-return ir-break ir-continue) nil)
                  (ir-block (collect (ir-block-body node) depth owner
                                     (if (block-set (ir-block-label node))
                                         (acons (ir-block-label node) owner blocks)
@@ -192,7 +192,7 @@ is true a store that no caller could make safe is an error."
                    (ir-call (walk-call node env depth owner))
                    (ir-foreign (walk-foreign node env owner))
                    (ir-match (walk-match node env depth owner))
-                   (ir-throw '())
+                   ((or ir-throw ir-panic) '())
                    (ir-block (walk-block node env depth owner))
                    (ir-loop (walk-loop node env depth owner))
                    ((or ir-break ir-continue) '())

@@ -32,6 +32,11 @@
                      (numeric-overflow-value condition)
                      (symbol-name (numeric-overflow-type condition))))))
 
+(define-condition panic (error)
+  ((message :initarg :message :reader panic-message))
+  (:report (lambda (condition stream)
+             (write-string (panic-message condition) stream))))
+
 (defun float-of (name value)
   (let ((format (if (= (numeric-bits name) 32) 'single-float 'double-float)))
     (cond ((typep value format) value)

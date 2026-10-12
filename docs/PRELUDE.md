@@ -94,7 +94,7 @@ stack when it grows.
   [#20](https://github.com/takeiteasy/sheaf/issues/20).
 - Other standard library functions that hold raw Lisp, such as those of `String`
   and `Char`, are errors: [#22](https://github.com/takeiteasy/sheaf/issues/22),
-  [#7](https://github.com/takeiteasy/sheaf/issues/7).
+  [#48](https://github.com/takeiteasy/sheaf/issues/48).
 
 [^capacity]: Capacity is a hint. A `Vector` has no capacity of its own, so `capacity`
     is its length, and Coalton's backend reports the room it holds, which is

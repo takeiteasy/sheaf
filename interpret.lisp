@@ -497,7 +497,16 @@ stacks and banks it saves, each with what it held on entry."
                     (if (prelude-op-p (ir-prim-op node))
                         (prelude (ir-prim-op node) args node)
                         (apply-primitive lowered (ir-prim-op node) args (ir-node-type node)))))
-                 (ir-foreign (error "Raw Lisp is not evaluated: ~s" (ir-foreign-form node)))
+                 (ir-foreign (error "Raw Lisp is not evaluated~@[, at offset ~d~]: ~s"
+                                    (let ((location (ir-node-location node)))
+                                      (and location (source:span-start (source:location-span location))))
+                                    (ir-foreign-form node)))
+                 (ir-panic
+                  (loop :for (handler catch-env tag) :in *handlers*
+                        :do (dolist (branch (ir-catch-branches handler))
+                              (unless (ir-catch-branch-type branch)
+                                (throw tag (list branch catch-env)))))
+                  (error 'panic :message (ir-panic-message node)))
                  (ir-match
                   (let ((value (live (evaluate (ir-match-scrutinee node) env) "A match read")))
                     (dolist (branch (ir-match-branches node) (error "No branch matches ~s" value))

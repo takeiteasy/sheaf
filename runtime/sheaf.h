@@ -353,7 +353,8 @@ static SHEAF_UNUSED SHEAF_NORETURN void sheaf_unwind(void) {
     _longjmp(sheaf_frames->env, 1);
 }
 
-static SHEAF_UNUSED SHEAF_NORETURN void sheaf_throw(int type, const char *name) {
+/* Land in the innermost catch that takes TYPE; returns if none does. */
+static SHEAF_UNUSED void sheaf_raise(int type) {
     for (sheaf_frame *frame = sheaf_frames; frame; frame = frame->prev) {
         int branch = frame->match ? frame->match(type) : -1;
         if (branch >= 0) {
@@ -362,7 +363,20 @@ static SHEAF_UNUSED SHEAF_NORETURN void sheaf_throw(int type, const char *name) 
             sheaf_unwind();
         }
     }
+}
+
+static SHEAF_UNUSED SHEAF_NORETURN void sheaf_throw(int type, const char *name) {
+    sheaf_raise(type);
     fprintf(stderr, "unhandled exception %s\n", name);
+    exit(1);
+}
+
+/* A panic is taken only by a catch of `_`. */
+#define SHEAF_PANIC (-2)
+
+static SHEAF_UNUSED SHEAF_NORETURN void sheaf_panic(const char *message) {
+    sheaf_raise(SHEAF_PANIC);
+    fprintf(stderr, "%s\n", message);
     exit(1);
 }
 

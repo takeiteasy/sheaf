@@ -23,8 +23,10 @@ releases in force at its start and a cell that notes the label is jumped to.")
 (defvar *aux* '() "The functions that expressions need defined before the defs, newest first.")
 (defvar *copies* nil "The types whose values a call copies out of the regions of a loop.")
 
+(defvar *emit-location* nil "The location of the node being rejected, which errors report in place of the def's.")
+
 (defun emit-error (control &rest args)
-  (let ((location (and *emit-def* (ir-def-location *emit-def*))))
+  (let ((location (or *emit-location* (and *emit-def* (ir-def-location *emit-def*)))))
     (error "The C emitter does not support ~?~@[ in ~a~]~@[, at offset ~d~]"
            control args
            (and *emit-def* (or (ir-def-origin *emit-def*) (ir-def-name *emit-def*)))
@@ -674,7 +676,8 @@ NODE to the stack it copies to."
     (ir-prim (prim-expr node env))
     (ir-construct (construct-expr node env))
     (ir-call (call-expr node env))
-    (ir-foreign (emit-error "raw Lisp: https://github.com/takeiteasy/sheaf/issues/7"))))
+    (ir-foreign (let ((*emit-location* (ir-node-location node)))
+                  (emit-error "raw Lisp")))))
 
 ;;; Statements
 
@@ -1060,6 +1063,7 @@ its loop's iteration began, then jump."
     (ir-return (emit-block-return node env))
     (ir-match (emit-match node target env))
     (ir-throw (emit-throw node env))
+    (ir-panic `((:expr (:call "sheaf_panic" (:string ,(ir-panic-message node))))))
     (ir-catch (emit-catch node target env))
     (ir-protect (emit-protect node target env))
     ((or ir-atom ir-prim ir-construct ir-call ir-foreign)

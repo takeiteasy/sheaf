@@ -67,6 +67,7 @@
    #:ir-construct #:ir-construct-constructor #:ir-construct-args #:ir-construct-stack
    #:ir-prim #:ir-prim-op #:ir-prim-args #:ir-prim-stack #:ir-prim-bank
    #:ir-foreign #:ir-foreign-vars #:ir-foreign-form
+   #:ir-panic #:ir-panic-message #:panic #:panic-message
    #:ir-match #:ir-match-scrutinee #:ir-match-branches
    #:ir-branch #:ir-branch-pattern #:ir-branch-body
    #:ir-loop #:ir-loop-label #:ir-loop-vars #:ir-loop-inits #:ir-loop-test #:ir-loop-steps #:ir-loop-body #:ir-loop-returns #:ir-loop-reset

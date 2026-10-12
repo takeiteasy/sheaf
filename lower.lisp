@@ -44,6 +44,7 @@
 (defstruct (ir-construct (:include ir-node)) constructor args (stack nil))
 (defstruct (ir-prim (:include ir-node)) op args (stack nil) (bank nil))
 (defstruct (ir-foreign (:include ir-node)) vars form)
+(defstruct (ir-panic (:include ir-node)) message)
 (defstruct (ir-match (:include ir-node)) scrutinee branches)
 (defstruct ir-branch pattern body)
 (defstruct (ir-block (:include ir-node)) label body)
@@ -91,7 +92,7 @@ reaches, and its root."
   "Call FUNCTION on NODE and on every node inside it, outermost first."
   (funcall function node)
   (etypecase node
-    ((or ir-literal ir-local ir-global ir-foreign ir-break ir-continue))
+    ((or ir-literal ir-local ir-global ir-foreign ir-panic ir-break ir-continue))
     (ir-let (walk-ir function (ir-let-value node))
             (walk-ir function (ir-let-body node)))
     ((or ir-call ir-construct ir-prim)
@@ -304,7 +305,20 @@ reaches, and its root."
     (numeric-overflow ()
       (lowering-error "the literal ~d, which does not fit ~a" value (symbol-name name)))))
 
+(defun literal-panic (name rands type)
+  "An `ir-panic` for a call of `error` NAME whose one argument in RANDS is a string literal, or NIL."
+  (let ((rand (first rands)))
+    (and (eq (or (specialized-origin *specialized* name) name) 'coalton/classes:error)
+         (null (rest rands))
+         (typep rand 'ast:node-literal)
+         (stringp (ast:node-literal-value rand))
+         (make-ir-panic :message (ast:node-literal-value rand) :type (lower-type type) :location *location*))))
+
 (defun lower-call (name rands type)
+  (or (literal-panic name rands type)
+      (lower-plain-call name rands type)))
+
+(defun lower-plain-call (name rands type)
   (let ((args (mapcar #'to-atom rands))
         (type (lower-type type)))
     (multiple-value-bind (op arity) (primitive-of name)
@@ -386,6 +400,60 @@ for a branch that catches every exception."
 (defun unit-node ()
   (make-ir-construct :constructor 'coalton:unit :args '() :type (lower-type tc:*unit-type*)
                      :location *location*))
+
+(defun panic-message-form (form)
+  "The message form of FORM, `(error 'panic :message MESSAGE)`, or NIL."
+  (and (consp form) (eq (first form) 'error)
+       (equal (second form) '(quote coalton/classes:panic))
+       (eq (third form) :message)
+       (null (nthcdr 4 form))
+       (fourth form)))
+
+(defun constant-message (form)
+  "The text of FORM, a string or a `format` of a control string alone, or NIL."
+  (typecase form
+    (string form)
+    (cons (and (eq (first form) 'format) (null (second form))
+               (stringp (third form)) (null (cdddr form))
+               (ignore-errors (format nil (third form)))))))
+
+(defun lower-assert (vars form type)
+  "The `ir-match` of FORM, the raw Lisp of an `assert` without format arguments, or NIL for other raw Lisp."
+  (let* ((statement (first form))
+         (datum-var (and (consp statement) (second statement)))
+         (message (and (null (rest form)) (consp statement) (eq (first statement) 'unless)
+                       (symbolp datum-var) (assoc datum-var vars) (null (nthcdr 3 statement))
+                       (panic-message-form (third statement)))))
+    (when (and (consp message) (eq (first message) 'format) (= (length message) 6)
+               (equal (third message) "Assertion ~A failed: ~?")
+               (equal (sixth message) '(list)))
+      (destructuring-bind (datum format-control arguments) (nthcdr 3 message)
+        (declare (ignore arguments))
+        (let ((boolean (lower-type tc:*boolean-type*)))
+          (flet ((branch (constructor body)
+                   (make-ir-branch :pattern (make-ir-pcon :constructor constructor :patterns '() :type boolean)
+                                   :body body)))
+            (make-ir-match
+             :scrutinee (make-ir-local :name (cdr (assoc datum-var vars)) :type boolean :location *location*)
+             :type type :location *location*
+             :branches (list (branch 'coalton:true (unit-node))
+                             (branch 'coalton:false
+                                     (make-ir-panic
+                                      :message (with-standard-io-syntax
+                                                 (format nil "Assertion ~A failed: ~?" (second datum) format-control '()))
+                                      :type type :location *location*))))))))))
+
+(defun lower-lisp (node)
+  "NODE, raw Lisp, as an `ir-panic` or the `ir-match` of an `assert` when it is
+one of those, otherwise as `ir-foreign`."
+  (let* ((vars (ast:node-lisp-vars node))
+         (form (ast:node-lisp-form node))
+         (type (lower-type (ast:node-type node)))
+         (message (and (null vars) (null (rest form))
+                       (constant-message (panic-message-form (first form))))))
+    (cond (message (make-ir-panic :message message :type type :location *location*))
+          ((lower-assert vars form type))
+          (t (make-ir-foreign :vars vars :form form :type type :location *location*)))))
 
 (defun lower-discarded (node)
   "The body that computes NODE, binds its value and gives Unit, for code run for its effects."
@@ -521,9 +589,7 @@ for everything it evaluates first."
                 (unit-node))
                ((null (rest nodes)) (lower-simple (first nodes)))
                (t (lowering-error "multiple values: https://github.com/takeiteasy/sheaf/issues/39")))))
-      (ast:node-lisp
-       (make-ir-foreign :vars (ast:node-lisp-vars node) :form (ast:node-lisp-form node)
-                        :type (lower-type (ast:node-type node)) :location *location*))
+      (ast:node-lisp (lower-lisp node))
       (ast:node-abstraction (lowering-error "a lambda below the top level")))))
 
 (defun lower-def (name node)
@@ -568,6 +634,23 @@ thrown value points to is freed while it unwinds."
                               (check field (cons type path))))))))
               (check exception '()))))
 
+(defun drop-unused-errors (lowered)
+  "Remove the defs of `error` that no call refers to, since every call of one with a
+literal message is an `ir-panic`."
+  (let ((used (make-hash-table :test 'eq))
+        (defs (lowered-defs lowered)))
+    (maphash (lambda (name def)
+               (declare (ignore name))
+               (walk-ir (lambda (node)
+                          (typecase node
+                            (ir-call (setf (gethash (ir-call-function node) used) t))
+                            (ir-global (setf (gethash (ir-global-name node) used) t))))
+                        (ir-def-body def)))
+             defs)
+    (loop :for name :being :the :hash-keys :of defs :using (:hash-value def)
+          :when (and (eq (ir-def-origin def) 'coalton/classes:error) (not (gethash name used)))
+            :do (remhash name defs))))
+
 (defun lower (specialized)
   "SPECIALIZED, a defunctionalized program, in Sheaf's IR."
   (check-defunctionalized specialized)
@@ -583,6 +666,7 @@ thrown value points to is freed while it unwinds."
                (unless (or (primitive-of name) (gethash name (specialized-passthrough specialized)))
                  (setf (gethash name (lowered-defs lowered)) (lower-def name node))))
              (specialized-bindings specialized))
+    (drop-unused-errors lowered)
     (build-type-table lowered)
     (check-exception-payloads lowered)
     lowered))
@@ -659,6 +743,7 @@ and primitive has its arity, and every operand is an atom. Returns T."
                    (dolist (branch (ir-match-branches node))
                      (check (ir-branch-body branch)
                             (append (check-pattern (ir-branch-pattern branch)) scope))))
+                  (ir-panic)
                   (ir-throw (check-atom (ir-throw-value node) scope))
                   (ir-catch
                    (check (ir-catch-body node) scope)

@@ -160,3 +160,24 @@
                        (sheaf:monomorphize (fixture-program "exceptions-rejected")
                                            (fixture-symbol "exceptions-rejected" root)))))))
       (is (search "issues/24" message) "~a" root))))
+
+(test panics-give-one-result-on-every-tier
+  (let ((expected (run-on-sbcl "panics")))
+    (is (= 2038 expected))
+    (is (zerop (count-ir (lowered "panics") 'sheaf:ir-foreign)))
+    (is (= expected (sheaf:run-lowered (lowered "panics"))))
+    (is (= expected (sheaf:run-lowered (assigned "panics"))))
+    (is (= expected (c-result "panics")))))
+
+(test an-unhandled-panic-ends-the-program
+  (signals sheaf:panic (sheaf:run-lowered (lowered "panics-uncaught")))
+  (multiple-value-bind (output errors code) (run-c (assigned "panics-uncaught"))
+    (declare (ignore output))
+    (is (/= 0 code))
+    (is (search "Assertion" errors))))
+
+(test raw-lisp-with-no-translation-is-an-error-at-its-location
+  (dolist (root '("MAIN-FORMAT" "MAIN-RAW"))
+    (let ((message (error-message (lambda () (sheaf:emit-c (assigned (list "panics-rejected" root)))))))
+      (is (search "raw Lisp" message) "~a" root)
+      (is (search "at offset" message) "~a" root))))

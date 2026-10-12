@@ -78,16 +78,34 @@ the type:
 Lowering does not support the exception type HEAVY, which holds VECTOR UFIX
 ```
 
+## Panics
+
+`assert`, `unreachable` and `error` with a string literal run on every tier. A
+panic unwinds like a throw: `protect` cleanups run and `catch` with `_` takes
+it, and no typed branch does. Unhandled, it prints its message to standard error
+and exits with status 1.
+
+| Coalton | Lowers to |
+|---|---|
+| `(assert d)` | A `match` on `d` whose `False` branch is an `ir-panic` of `Assertion <d> failed: ` |
+| `(unreachable)` | An `ir-panic` of `Unreachable` |
+| `(error "text")` | An `ir-panic` of `text` |
+
+Any other raw Lisp stays `ir-foreign`. The interpreter rejects it and the C
+emitter rejects it with the offset of the raw Lisp itself[^text].
+
 ## Limitations
 
 - `handle`, `resumable` and `resume-to` are errors:
   [#24](https://github.com/takeiteasy/sheaf/issues/24).
 - A return out of a `catch` or `protect` is an error:
   [#40](https://github.com/takeiteasy/sheaf/issues/40).
-- `_` takes every exception a program throws. Overflow, an index outside an array,
-  a `match` with no branch and an exhausted stack end the program, and raw
-  Lisp such as `unwrap` and `assert` is not translated
-  ([#7](https://github.com/takeiteasy/sheaf/issues/7)).
+- `_` takes every exception a program throws and every panic. Overflow, an index
+  outside an array, a `match` with no branch and an exhausted stack end the
+  program.
+- An `assert` with format arguments, an `error` whose message is not a string
+  literal, and `unwrap` and `expect` are raw Lisp:
+  [#48](https://github.com/takeiteasy/sheaf/issues/48).
 - A handler whose guarded expression stores a value that holds storage keeps
   the cells it built in a stack in use:
   [#27](https://github.com/takeiteasy/sheaf/issues/27).
@@ -103,3 +121,5 @@ Lowering does not support the exception type HEAVY, which holds VECTOR UFIX
     handler gives them back only if its guarded expression, a cleanup in it and
     every def they call store no value that holds storage and run no raw Lisp,
     since a stored value could outlive the unwind.
+[^text]: The text of an `assert` is built when it is lowered, with the datum
+    printed with package prefixes, so it can differ from the text SBCL prints.

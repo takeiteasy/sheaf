@@ -117,7 +117,7 @@ pool of its own holds."
                (ir-call (and (not reaches) (placement-ordinary (callee-placement node))))
                (ir-match (some (lambda (branch) (scan (ir-branch-body branch) reaches))
                                (ir-match-branches node)))
-               (ir-throw nil)
+               ((or ir-throw ir-panic) nil)
                (ir-block (scan (ir-block-body node) reaches))
                ((or ir-return ir-break ir-continue) nil)
                (ir-loop (or (and (ir-loop-test node) (scan (ir-loop-test node) nil))
@@ -195,7 +195,7 @@ lets whose values reach the result."
                     (setf ordinary (or ordinary branch-ordinary)
                           growables (max growables branch-growables)
                           banked (or banked branch-banked))))))
-    (ir-throw (values nil 0 nil))
+    ((or ir-throw ir-panic) (values nil 0 nil))
     (ir-block (needs (ir-block-body node) reaches reached))
     ((or ir-return ir-break ir-continue) (values nil 0 nil))
     (ir-loop (multiple-value-bind (ordinary growables banked) (needs (ir-loop-returns node) reaches reached)
@@ -266,7 +266,7 @@ in VALUE that its value holds have taken."
                 (tail-need (ir-let-body node))))
     (ir-match (reduce #'max (ir-match-branches node) :key (lambda (branch) (tail-need (ir-branch-body branch)))
                                                       :initial-value 0))
-    ((or ir-throw ir-return ir-break ir-continue) 0)
+    ((or ir-throw ir-panic ir-return ir-break ir-continue) 0)
     (ir-block (let ((set (block-set (ir-block-label node))))
                 (if set
                     (nth-value 1 (needs (ir-block-body node) t set))
@@ -284,7 +284,7 @@ in VALUE that its value holds have taken."
     (ir-let (tail-banked-p (if (returns-own-name-p node) (ir-let-value node) (ir-let-body node))))
     (ir-match (some (lambda (branch) (tail-banked-p (ir-branch-body branch)))
                     (ir-match-branches node)))
-    ((or ir-throw ir-return ir-break ir-continue) nil)
+    ((or ir-throw ir-panic ir-return ir-break ir-continue) nil)
     (ir-block (let ((set (block-set (ir-block-label node))))
                 (if set
                     (nth-value 2 (needs (ir-block-body node) t set))
@@ -373,7 +373,7 @@ which `emit-node` can turn into jumps."
                  (ir-loop (walk (ir-loop-returns node) owned))
                  (ir-call (unless (or owned (ir-call-region node))
                             (push node calls)))
-                 ((or ir-atom ir-prim ir-construct ir-foreign ir-throw ir-return ir-break ir-continue ir-protect)))))
+                 ((or ir-atom ir-prim ir-construct ir-foreign ir-throw ir-panic ir-return ir-break ir-continue ir-protect)))))
       (when (eq (ir-def-kind def) :function)
         (walk (ir-def-body def) (ir-def-pool def))))
     calls))
@@ -488,7 +488,7 @@ effects from TABLE."
                (when known (merge-effects effects known)))))
       (walk-ir (lambda (node)
                  (etypecase node
-                   ((or ir-literal ir-local ir-match ir-throw ir-catch ir-block ir-return ir-loop ir-break ir-continue))
+                   ((or ir-literal ir-local ir-match ir-throw ir-panic ir-catch ir-block ir-return ir-loop ir-break ir-continue))
                    (ir-global (def (ir-global-name node)))
                    (ir-foreign (setf (effects-stores effects) t))
                    (ir-construct (stacks (list (ir-construct-stack node))))
@@ -725,7 +725,7 @@ uses it."
                                 (and bank (list bank)))))))
              (rewrite (node reaches busy owned supply owned-bank)
                (etypecase node
-                 ((or ir-literal ir-local ir-foreign) node)
+                 ((or ir-literal ir-local ir-foreign ir-panic) node)
                  (ir-global (rewrite-atom node))
                  (ir-let
                   (let* ((value (ir-let-value node))
