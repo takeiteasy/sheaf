@@ -305,3 +305,9 @@ pushed to that function's pool."
   (is (integerp (sheaf:ir-def-pool (first (clones "arrays" "TWO-ARRAYS")))))
   (is (search "grew under"
               (error-text (lambda () (sheaf:run-lowered (with-shared-stack "arrays" "TWO-ARRAYS")))))))
+
+(test a-generic-loop-runs-on-every-tier
+  (let ((expected (run-on-sbcl "generic-loops")))
+    (is (= 5 expected))
+    (is (= expected (sheaf:run-lowered (lowered "generic-loops"))))
+    (is (= expected (sheaf:run-lowered (assigned "generic-loops"))))))

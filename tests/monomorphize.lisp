@@ -98,3 +98,18 @@
                   (sheaf:specialization-error (e) (sheaf:specialization-error-chain e)))))
     (is (= (+ 2 sheaf:*specialization-limit*) (length chain)))
     (is (every (lambda (link) (eq deepen (first link))) (rest chain)))))
+
+(test a-loop-variable-of-generic-code-has-a-ground-type
+  (let ((bindings 0))
+    (maphash (lambda (name node)
+               (declare (ignore name))
+               (traverse:traverse
+                node
+                (list (traverse:action (:after ast:node-for loop)
+                        (dolist (binding (ast:node-for-bindings loop))
+                          (incf bindings)
+                          (is (null (tc:type-variables (ast:node-for-binding-type binding)))))
+                        loop))))
+             (sheaf:specialized-bindings (specialized "generic-loops")))
+    (is (= 4 bindings))
+    (is (= 5 (run-on-sbcl "generic-loops")))))
