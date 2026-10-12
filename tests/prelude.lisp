@@ -85,6 +85,15 @@
     (is (= expected (sheaf:run-lowered (lowered "growable-returns"))))
     (is (= expected (sheaf:run-lowered (assigned "growable-returns"))))))
 
+(test an-early-return-below-the-body-runs-on-every-tier
+  (dolist (name '("GROWN" "BRANCHY"))
+    (dolist (crossing '(nil t))
+      (loop :for (n expected) :in '((9 1) (2 2))
+            :do (let ((program (below-the-body name n :crossing crossing)))
+                  (is (hash-table-p (sheaf:check-roots program)))
+                  (is (= expected (sheaf:run-lowered program)))
+                  (is (= expected (sheaf:run-lowered (sheaf:assign-stacks program)))))))))
+
 (test a-loop-gives-back-the-growable-values-its-body-builds-at-each-back-edge
   (is (some (lambda (def)
               (let ((found nil))

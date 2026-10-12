@@ -223,6 +223,114 @@ body BODY-FN builds from a function that makes a call of `make`."
     (is (equal (sheaf:ir-def-growables (gethash (sheaf:lowered-root assigned) (sheaf:lowered-defs assigned)))
                (sheaf:ir-call-growables (sheaf:ir-let-value body))))))
 
+(defun below-the-body (name n &key crossing)
+  "The `growable-returns` program with a root that gives the length of the Vector
+the function NAME returns for N, with its body, a block that returns early, as
+the value of a let, and a second Vector built after it. With CROSSING a block of its own below that one holds it, so the
+early return leaves two blocks."
+  (let* ((source (lowered "growable-returns"))
+         (program (sheaf::%make-lowered :root 'below-root))
+         (grown (loop :for def :being :the :hash-values :of (sheaf:lowered-defs source)
+                      :when (search name (symbol-name (sheaf:ir-def-name def))) :return def))
+         (number (cdr (first (sheaf:ir-def-params grown))))
+         (vector (sheaf:ir-def-result grown))
+         (body (sheaf:ir-def-body grown))
+         (x (make-symbol "X"))
+         (y (make-symbol "Y"))
+         (w (make-symbol "W"))
+         (value (if crossing
+                    (let ((inner (copy-structure body)))
+                      (setf (sheaf::ir-block-label inner) (make-symbol "INNER"))
+                      (sheaf::make-ir-block
+                       :label (sheaf::ir-block-label body) :type vector
+                       :body (sheaf::make-ir-let :name y :value inner :type vector
+                                                 :body (sheaf::make-ir-local :name y :type vector))))
+                    body)))
+    (maphash (lambda (name def) (setf (gethash name (sheaf:lowered-defs program)) def))
+             (sheaf:lowered-defs source))
+    (maphash (lambda (name type) (setf (gethash name (sheaf::lowered-types program)) type))
+             (sheaf::lowered-types source))
+    (setf (gethash 'below (sheaf:lowered-defs program))
+          (sheaf::make-ir-def 'below nil :function (sheaf:ir-def-params grown) number
+                              (sheaf::make-ir-let
+                               :name x :value value :type number
+                               :body (sheaf::make-ir-let
+                                      :name w :type number
+                                      :value (sheaf::make-ir-prim :op :vector-new :type vector)
+                                      :body (flet ((push-seven ()
+                                                     (sheaf::make-ir-prim
+                                                      :op :vector-push :type number
+                                                      :args (list (sheaf::make-ir-literal :value 7 :type number)
+                                                                  (sheaf::make-ir-local :name w :type vector)))))
+                                              (sheaf::make-ir-let
+                                               :name (make-symbol "_") :type number :value (push-seven)
+                                               :body (sheaf::make-ir-let
+                                                      :name (make-symbol "_") :type number :value (push-seven)
+                                                      :body (sheaf::make-ir-prim
+                                                             :op :vector-length :type number
+                                                             :args (list (sheaf::make-ir-local :name x :type vector))))))))
+                              nil)
+          (gethash 'below-root (sheaf:lowered-defs program))
+          (sheaf::make-ir-def 'below-root nil :function '() number
+                              (sheaf::make-ir-call :function 'below :type number
+                                                   :args (list (sheaf::make-ir-literal :value n :type number)))
+                              nil))
+    program))
+
+(defun block-of-two (label make-call result)
+  "A block of LABEL that builds the growable locals `a` and `b`, returns `a` early
+from a branch and falls through to `b`, bound to RESULT."
+  (flet ((local (name) (sheaf::make-ir-local :name name :type *growable*)))
+    (sheaf::make-ir-let
+     :name 'x :type *growable*
+     :value (sheaf::make-ir-block
+             :label label :type *growable*
+             :body (sheaf::make-ir-let
+                    :name 'a :value (funcall make-call) :type *growable*
+                    :body (sheaf::make-ir-let
+                           :name 'b :value (funcall make-call) :type *growable*
+                           :body (sheaf::make-ir-let
+                                  :name 'ignored :type *growable*
+                                  :value (sheaf::make-ir-match
+                                          :scrutinee (zero) :type *number*
+                                          :branches (list (sheaf::make-ir-branch
+                                                           :pattern (sheaf::make-ir-pwild :type *number*)
+                                                           :body (sheaf::make-ir-return
+                                                                  :label label :value (local 'a) :type *number*))))
+                                  :body (local 'b)))))
+     :body result)))
+
+(test a-block-below-the-body-builds-the-values-it-returns-on-its-binders-stacks
+  (let* ((label (make-symbol "L"))
+         (assigned (hand-built *number*
+                               (lambda (make-call) (block-of-two label make-call (zero)))))
+         (x (root-body assigned))
+         (a (sheaf:ir-block-body (sheaf:ir-let-value x)))
+         (b (sheaf:ir-let-body a)))
+    (is (equal '(0 1) (sheaf:ir-let-stacks x)))
+    (is (null (sheaf:ir-let-stacks a)))
+    (is (null (sheaf:ir-let-stacks b)))
+    (is (equal '(0) (sheaf:ir-call-growables (sheaf:ir-let-value a))))
+    (is (equal '(1) (sheaf:ir-call-growables (sheaf:ir-let-value b))))
+    (is (= 2 (sheaf:lowered-stack-count assigned)))))
+
+(test a-block-below-the-body-whose-value-is-returned-builds-on-the-callers-stacks
+  (let* ((label (make-symbol "L"))
+         (assigned (hand-built *growable*
+                               (lambda (make-call)
+                                 (let ((x (block-of-two label make-call nil)))
+                                   (setf (sheaf::ir-let-body x) (sheaf::make-ir-local :name 'x :type *growable*))
+                                   x))))
+         (x (root-body assigned))
+         (a (sheaf:ir-block-body (sheaf:ir-let-value x)))
+         (b (sheaf:ir-let-body a))
+         (def (gethash (sheaf:lowered-root assigned) (sheaf:lowered-defs assigned))))
+    (is (null (sheaf:ir-let-stacks x)))
+    (is (= 2 (length (sheaf:ir-def-growables def))))
+    (is (equal (sheaf:ir-def-growables def)
+               (append (sheaf:ir-call-growables (sheaf:ir-let-value a))
+                       (sheaf:ir-call-growables (sheaf:ir-let-value b)))))))
+
 (defun leaking (owner)
   "A program whose `leak` builds a list in the pool of OWNER, `leak` or `main`."
   (let* ((list-type (sheaf::make-ir-type :list :data 'list '()))

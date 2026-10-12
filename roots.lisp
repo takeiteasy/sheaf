@@ -8,19 +8,21 @@
 (defvar *reference-types*)
 (defvar *here* nil "The location of the node being checked, for errors.")
 
-(defstruct (root-summary (:constructor make-root-summary (&key result stores locals reached bare-calls bare-loops slice-free-calls call-roots)))
+(defstruct (root-summary (:constructor make-root-summary (&key result stores locals reached block-reached bare-calls bare-loops slice-free-calls call-roots)))
   "What a def does with the roots of its arguments. RESULT lists what its result
 may point into: a parameter index, `:global`, or `:fresh` for storage it builds
 in its caller's destinations. STORES lists the stores it leaves its caller to
 check, each a parameter index, the parameter index or `:global` it is stored
 into, and the chain of places that justifies it. LOCALS maps each name to its
 roots. REACHED lists the locals whose storage the result holds, which are built
-in the caller's destinations. BARE-CALLS lists the calls whose arguments point
+in the caller's destinations. BLOCK-REACHED maps the label of each block below the
+def's body to a table of the locals whose storage its value holds, which are built
+on the stacks of what receives it. BARE-CALLS lists the calls whose arguments point
 only into parameters and globals, and SLICE-FREE-CALLS those whose arguments
 reach no growable value the def built. BARE-LOOPS lists the loops whose variables
 point only into parameters, globals and what was built before them. CALL-ROOTS lists each call with the roots
 of its arguments and everything those reach."
-  (result '()) (stores '()) (locals nil) (reached '()) (bare-calls '()) (bare-loops '()) (slice-free-calls '())
+  (result '()) (stores '()) (locals nil) (reached '()) (block-reached nil) (bare-calls '()) (bare-loops '()) (slice-free-calls '())
   (call-roots '()))
 
 ;; op, how it treats roots, and the arguments it uses
@@ -66,38 +68,47 @@ stack assignment gives it out: -1 for the caller's stacks, 0 for the function's
 pool, or the number of `match` branches around a growable local freed when its
 branch ends. REACHED holds the locals the result holds."
   (let ((lifetimes (make-hash-table :test 'eq)))
-    (labels ((collect (node depth owner)
-               "OWNER is when the stacks a returned let takes are freed."
+    (labels ((collect (node depth owner blocks)
+               "OWNER is when the stacks a returned let takes are freed. BLOCKS
+holds each open block below the def's body with its owner, innermost first."
                (etypecase node
                  ((or ir-atom ir-prim ir-call ir-construct ir-foreign) nil)
                  (ir-let
                   (let* ((value (ir-let-value node))
-                         (returned (and (not (gethash (ir-let-name node) reached)) (returns-own-name-p node)))
-                         (lifetime (cond ((gethash (ir-let-name node) reached) -1)
+                         (name (ir-let-name node))
+                         (claim (and (not (gethash name reached))
+                                     (find-if (lambda (block) (gethash name (block-set (car block))))
+                                              blocks :from-end t)))
+                         (returned (and (not (gethash name reached)) (returns-own-name-p node)))
+                         (lifetime (cond ((gethash name reached) -1)
+                                         (claim (cdr claim))
                                          (returned owner)
                                          ((or (plusp (tail-need value)) (tail-banked-p value)) depth)
                                          (t 0))))
-                    (setf (gethash (ir-let-name node) lifetimes) lifetime)
-                    (collect value depth lifetime)
-                    (collect (ir-let-body node) depth owner)))
+                    (setf (gethash name lifetimes) lifetime)
+                    (collect value depth lifetime blocks)
+                    (collect (ir-let-body node) depth owner blocks)))
                  (ir-match
                   (dolist (branch (ir-match-branches node))
-                    (collect (ir-branch-body branch) (1+ depth) owner)))
+                    (collect (ir-branch-body branch) (1+ depth) owner blocks)))
                  ((or ir-throw ir-return ir-break ir-continue) nil)
-                 (ir-block (collect (ir-block-body node) depth owner))
+                 (ir-block (collect (ir-block-body node) depth owner
+                                    (if (block-set (ir-block-label node))
+                                        (acons (ir-block-label node) owner blocks)
+                                        blocks)))
                  (ir-loop
-                  (when (ir-loop-test node) (collect (ir-loop-test node) (1+ depth) owner))
+                  (when (ir-loop-test node) (collect (ir-loop-test node) (1+ depth) owner blocks))
                   (dolist (step (ir-loop-steps node))
-                    (when step (collect step (1+ depth) owner)))
-                  (collect (ir-loop-body node) (1+ depth) owner)
-                  (collect (ir-loop-returns node) depth owner))
+                    (when step (collect step (1+ depth) owner blocks)))
+                  (collect (ir-loop-body node) (1+ depth) owner blocks)
+                  (collect (ir-loop-returns node) depth owner blocks))
                  (ir-catch
                   (dolist (body (cons (ir-catch-body node) (mapcar #'ir-catch-branch-body (ir-catch-branches node))))
-                    (collect body (1+ depth) owner)))
+                    (collect body (1+ depth) owner blocks)))
                  (ir-protect
-                  (collect (ir-protect-body node) (1+ depth) owner)
-                  (collect (ir-protect-cleanup node) (1+ depth) owner)))))
-      (collect node 0 -1))
+                  (collect (ir-protect-body node) (1+ depth) owner blocks)
+                  (collect (ir-protect-cleanup node) (1+ depth) owner blocks)))))
+      (collect node 0 -1 '()))
     lifetimes))
 
 (defun root-text (root def-name)
@@ -129,6 +140,8 @@ is true a store that no caller could make safe is an error."
          (pending '())
          (branches '())
          (returned (make-hash-table :test 'eq))
+         (block-roots (make-hash-table :test 'eq))
+         (root-label (let ((body (ir-def-body def))) (and (ir-block-p body) (ir-block-label body))))
          (*here* (ir-def-location def)))
     (labels ((entry (text)
                (list def-name text *here*))
@@ -295,8 +308,11 @@ REPORT is true, notes that they must not outlive what BODY frees."
              (walk-block (node env depth owner)
                (let ((label (ir-block-label node)))
                  (setf (gethash label returned) (list '() depth))
-                 (merge-roots (walk (ir-block-body node) env depth owner)
-                              (first (gethash label returned)))))
+                 (let ((roots (merge-roots (walk (ir-block-body node) env depth owner)
+                                           (first (gethash label returned)))))
+                   (unless (eq label root-label)
+                     (setf (gethash label block-roots) roots))
+                   roots)))
              (walk-loop (node env depth owner)
                (let* ((vars (ir-loop-vars node))
                       (inits (mapcar (lambda (init) (walk init env depth owner)) (ir-loop-inits node)))
@@ -397,12 +413,22 @@ REPORT is true, notes that they must not outlive what BODY frees."
                       (and (holds-storage-p (ir-def-result def)) reached)))
              (reached (remove-if (lambda (root) (or (not (symbolp root)) (keywordp root)))
                                  (closure roots (list contents links))))
+             (block-reached (let ((table (make-hash-table :test 'eq)))
+                              (maphash (lambda (label block-value)
+                                         (let ((names (make-hash-table :test 'eq)))
+                                           (dolist (name (closure block-value (list contents links)))
+                                             (when (and (symbolp name) (not (keywordp name)) (not (member name reached)))
+                                               (setf (gethash name names) t)))
+                                           (setf (gethash label table) names)))
+                                       block-roots)
+                              table))
              (result '()))
         (when report
           (let ((live (make-hash-table :test 'eq)))
             (dolist (name reached)
               (setf (gethash name live) t))
-            (let ((lifetimes (let-lifetimes (ir-def-body def) live)))
+            (let ((lifetimes (let ((*block-reached* block-reached))
+                               (let-lifetimes (ir-def-body def) live))))
               (flet ((freed-at (roots)
                        (reduce #'max (closure roots (list links contents))
                                :key (lambda (root) (gethash root lifetimes -1))
@@ -430,6 +456,7 @@ REPORT is true, notes that they must not outlive what BODY frees."
                              :stores (reverse stores)
                              :locals locals
                              :reached reached
+                             :block-reached block-reached
                              :bare-calls bare-calls
                              :bare-loops bare-loops
                              :call-roots call-reach

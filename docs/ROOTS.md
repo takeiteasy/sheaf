@@ -103,6 +103,7 @@ check the stores it leaves for them.
 | `root-summary-stores` | Each store the function makes of one parameter into another or into a global |
 | `root-summary-locals` | The roots of every name in the function |
 | `root-summary-reached` | The locals whose storage the result holds, which stack assignment builds in the caller's destinations |
+| `root-summary-block-reached` | For each block below the function's body, the locals whose storage its value holds, which stack assignment builds on the stacks of what receives the block |
 | `root-summary-bare-calls` | The calls whose arguments point only into parameters and globals, which may free their iteration's storage ([STACKS.md](STACKS.md#loops)) |
 | `root-summary-call-roots` | Each call with the roots its arguments hold and everything those reach, which find the calls that may switch regions ([STACKS.md](STACKS.md#loops)) |
 | `root-summary-slice-free-calls` | The calls whose arguments reach no growable value the function built, which may give back the slices their iteration took from a bank |

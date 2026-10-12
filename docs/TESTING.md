@@ -47,6 +47,7 @@ programs are also compiled back to Lisp and run; lowered ones run on
 | `roots-rejected.lisp` | Stores of a reference into storage that outlives what it points into: directly, through an array that holds it, through calls, into a parameter, into a global, out of a branch that frees what it points into, and through recursion |
 | `cells.lisp` | Cells built locally, returned, swapped and captured by a closure |
 | `growables.lisp` | Results that hold growable values, each on a stack of its own, and cycles that build them at every level |
+| `growable-returns.lisp` | Early returns of a `Vector`: out of a branch, with another live, out of a closure and out of a loop body; two of its functions are also spliced in as the value of a let, which puts the early return in a block below the function's body, once inside a second block |
 | `growable-recursion.lisp` | A growable local kept across a call back into its recursive cycle, which stack assignment rejects |
 | `hashtables.lisp` | Hash tables built locally and returned, and every operation on them |
 | `numbers.lisp` | Arithmetic, equality and ordering of each numeric type, overflow, and arrays and hash tables of numbers, on SBCL, the interpreter and in C |

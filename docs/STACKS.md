@@ -148,8 +148,10 @@ stores no value that holds storage[^loop]:
 
 ## Early returns
 
-A `return` of a growable value builds it on the function's growable stacks, as
-the value it falls through to does. A loop body that builds one it may return
+A `return` of a growable value builds it on the stacks of whatever receives the
+block it leaves, as the value the block falls through to does: the function's
+growable stacks for its body, the let that binds it for a block below[^block].
+A loop body that builds one it may return
 gives it back at each back edge[^exit]:
 
 ```lisp
@@ -287,3 +289,8 @@ freed.
 [^exit]: The reset is on `ir-loop-reset`, as for a pool, and applies unless the
     loop stores a value that holds storage or runs a handler. A `break` leaves
     what its last iteration built.
+
+[^block]: The let takes a stack for each growable value the block's early returns
+    and its tail build, the most any one path builds, and the lets that build
+    them take those stacks in turn. A return that leaves several blocks builds
+    on the stacks of the outermost.

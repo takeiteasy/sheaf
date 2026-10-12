@@ -13,6 +13,12 @@
 (defvar *global-busy*)
 (defvar *stack-count*)
 (defvar *summaries*)
+(defvar *block-reached* nil
+  "A table from the label of each block below the def's body to a table of the
+locals whose storage its value holds.")
+(defvar *open-blocks* '()
+  "Each block being assigned below the def's body as `(label stacks bank)`, the
+stacks and bank its early-returned values are built on, innermost first.")
 (defvar *placements*)
 (defvar *banked*)
 (defvar *alternating*)
@@ -226,6 +232,23 @@ lets whose values reach the result."
           :key (lambda (part) (nth-value 1 (needs part nil reached)))
           :initial-value 0))
 
+(defun block-set (label)
+  "The table of the locals whose storage the value of the block LABEL holds, if the
+block is below the def's body."
+  (and *block-reached* (gethash label *block-reached*)))
+
+(defun block-claim (name)
+  "The open block that builds the local NAME on its stacks: the outermost whose
+value holds it."
+  (find-if (lambda (entry) (gethash name (block-set (first entry)))) *open-blocks* :from-end t))
+
+(defun consume-blocks (name value)
+  "The open blocks after the let NAME of VALUE, each without the stacks the lets
+in VALUE that its value holds have taken."
+  (loop :for (label stacks bank) :in *open-blocks*
+        :for set := (block-set label)
+        :collect (list label (nthcdr (nth-value 1 (needs value (and (gethash name set) t) set)) stacks) bank)))
+
 (defun returns-own-name-p (let-node)
   "Whether LET-NODE ends by returning the value it binds."
   (loop :for body := (ir-let-body let-node) :then (ir-let-body body)
@@ -244,7 +267,10 @@ lets whose values reach the result."
     (ir-match (reduce #'max (ir-match-branches node) :key (lambda (branch) (tail-need (ir-branch-body branch)))
                                                       :initial-value 0))
     ((or ir-throw ir-return ir-break ir-continue) 0)
-    (ir-block (tail-need (ir-block-body node)))
+    (ir-block (let ((set (block-set (ir-block-label node))))
+                (if set
+                    (nth-value 1 (needs (ir-block-body node) t set))
+                    (tail-need (ir-block-body node)))))
     (ir-loop (tail-need (ir-loop-returns node)))
     (ir-catch (reduce #'max (cons (ir-catch-body node) (mapcar #'ir-catch-branch-body (ir-catch-branches node)))
                       :key #'tail-need))
@@ -259,7 +285,10 @@ lets whose values reach the result."
     (ir-match (some (lambda (branch) (tail-banked-p (ir-branch-body branch)))
                     (ir-match-branches node)))
     ((or ir-throw ir-return ir-break ir-continue) nil)
-    (ir-block (tail-banked-p (ir-block-body node)))
+    (ir-block (let ((set (block-set (ir-block-label node))))
+                (if set
+                    (nth-value 2 (needs (ir-block-body node) t set))
+                    (tail-banked-p (ir-block-body node)))))
     (ir-loop (tail-banked-p (ir-loop-returns node)))
     (ir-catch (some #'tail-banked-p (cons (ir-catch-body node) (mapcar #'ir-catch-branch-body (ir-catch-branches node)))))
     (ir-protect (tail-banked-p (ir-protect-body node)))))
@@ -613,7 +642,9 @@ slice built in it."
                  (list (list :bank bank))))))
 
 (defun assign-def (def clone destination growables bank region spare entry-busy)
-  (let* ((cycle (gethash (ir-def-name def) *cycles*))
+  (let* ((*block-reached* (root-summary-block-reached (gethash (ir-def-name def) *summaries*)))
+         (*open-blocks* '())
+         (cycle (gethash (ir-def-name def) *cycles*))
          (reached (reached-table def))
          (pool (if cycle
                    region
@@ -699,19 +730,27 @@ uses it."
                  (ir-let
                   (let* ((value (ir-let-value node))
                          (reaches-value (gethash (ir-let-name node) reached))
-                         (returned (and (not reaches-value) (returns-own-name-p node)))
-                         (stacks (unless (or reaches-value returned) (take-stacks (tail-need value) busy)))
-                         (let-bank (and (not reaches-value) (not returned) (tail-banked-p value)
+                         (claim (and (not reaches-value) (block-claim (ir-let-name node))))
+                         (returned (and (not reaches-value) (not claim) (returns-own-name-p node)))
+                         (stacks (unless (or reaches-value claim returned) (take-stacks (tail-need value) busy)))
+                         (let-bank (and (not reaches-value) (not claim) (not returned) (tail-banked-p value)
                                         (take-index (reduce #'with-index stacks :initial-value busy))))
                          (inner (with-index (reduce #'with-index stacks :initial-value busy) let-bank))
                          (used (nth-value 1 (needs value reaches-value reached)))
+                         (blocks (and *open-blocks* (consume-blocks (ir-let-name node) value)))
+                         (body-owned (if (and blocks (eq owned (second (first *open-blocks*))))
+                                         (second (first blocks))
+                                         owned))
                          (copy (copy-ir-let node)))
                     (setf (ir-let-stacks copy) stacks
                           (ir-let-bank copy) let-bank
-                          (ir-let-value copy) (rewrite value reaches-value inner (if returned owned stacks) supply
-                                                       (if returned owned-bank let-bank))
-                          (ir-let-body copy) (rewrite (ir-let-body node) reaches inner owned (nthcdr used supply)
-                                                      owned-bank))
+                          (ir-let-value copy) (rewrite value reaches-value inner
+                                                       (cond (claim (second claim)) (returned owned) (t stacks))
+                                                       supply
+                                                       (cond (claim (third claim)) (returned owned-bank) (t let-bank)))
+                          (ir-let-body copy) (let ((*open-blocks* (or blocks *open-blocks*)))
+                                               (rewrite (ir-let-body node) reaches inner body-owned
+                                                        (nthcdr used supply) owned-bank)))
                     copy))
                  (ir-call (rewrite-call node reaches busy owned supply owned-bank))
                  (ir-construct
@@ -746,7 +785,10 @@ uses it."
                     (setf (ir-throw-value copy) (rewrite-atom (ir-throw-value node)))
                     copy))
                  (ir-block
-                  (let ((copy (copy-ir-block node)))
+                  (let ((copy (copy-ir-block node))
+                        (*open-blocks* (if (and (not reaches) (block-set (ir-block-label node)))
+                                           (cons (list (ir-block-label node) owned owned-bank) *open-blocks*)
+                                           *open-blocks*)))
                     (setf (ir-block-body copy) (rewrite (ir-block-body node) reaches busy owned supply owned-bank))
                     copy))
                  (ir-return
@@ -895,26 +937,17 @@ stack below its stack count. Returns T."
      (lowered-defs lowered))
     t))
 
-(defun check-exits (lowered)
-  "Signal an error for a return of a growable value out of a block below a def's
-root, and for a loop variable of one that a step builds anew."
+(defun check-loop-steps (lowered)
+  "Signal an error for a loop variable of a growable value that a step builds anew."
   (maphash (lambda (name def)
-             (let* ((body (ir-def-body def))
-                    (root (and (ir-block-p body) (ir-block-label body))))
-               (walk-ir (lambda (node)
-                          ;; TODO: tail-need, tail-banked-p and returns-own-name-p count the values a block returns early (#47)
-                          (when (and (ir-return-p node)
-                                     (not (eq (ir-return-label node) root))
-                                     (holds-growable-p (ir-node-type (ir-return-value node))))
-                            (error "~s returns a growable value out of a block below its body: https://github.com/takeiteasy/sheaf/issues/47"
-                                   name))
-                          (when (ir-loop-p node)
-                            (loop :for (nil . type) :in (ir-loop-vars node)
-                                  :for step :in (ir-loop-steps node)
-                                  :when (and step (holds-growable-p type) (not (typep step 'ir-atom)))
-                                    :do (error "~s builds a growable loop variable anew in each iteration: https://github.com/takeiteasy/sheaf/issues/41"
-                                               name))))
-                        body)))
+             (walk-ir (lambda (node)
+                        (when (ir-loop-p node)
+                          (loop :for (nil . type) :in (ir-loop-vars node)
+                                :for step :in (ir-loop-steps node)
+                                :when (and step (holds-growable-p type) (not (typep step 'ir-atom)))
+                                  :do (error "~s builds a growable loop variable anew in each iteration: https://github.com/takeiteasy/sheaf/issues/41"
+                                             name))))
+                      (ir-def-body def)))
            (lowered-defs lowered)))
 
 (defun assign-stacks (lowered)
@@ -937,7 +970,7 @@ called in, so every stack index is a constant. Returns the new program, whose
          (*global-busy* '())
          (*stack-count* 0)
          (root (gethash (lowered-root lowered) defs)))
-    (check-exits lowered)
+    (check-loop-steps lowered)
     (find-swaps defs)
     (flet ((take-global (name)
              (let ((placement (gethash name *placements*)))

@@ -219,3 +219,11 @@ and exit code."
 (test an-early-return-of-a-growable-value-matches-in-c
   (is (= (run-on-sbcl "growable-returns")
          (parse-integer (run-c (assigned "growable-returns") "-fsanitize=address" "-g")))))
+
+(test an-early-return-below-the-body-matches-in-c
+  (dolist (name '("GROWN" "BRANCHY"))
+    (dolist (crossing '(nil t))
+      (loop :for (n expected) :in '((9 1) (2 2))
+            :do (is (= expected (parse-integer
+                                 (run-c (sheaf:assign-stacks (below-the-body name n :crossing crossing))
+                                        "-fsanitize=address" "-g"))))))))
