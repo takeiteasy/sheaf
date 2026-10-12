@@ -275,6 +275,24 @@ cycle's members and whether they build storage, which needs a region."
             (setf (gethash name table) cycle)))))
     table))
 
+(defun tail-calls (def)
+  "The calls in tail position of DEF that nothing needs to be given back after,
+which `emit-node` can turn into jumps."
+  (let ((calls '()))
+    (labels ((walk (node owned)
+               (etypecase node
+                 (ir-let (walk (ir-let-body node) (or owned (ir-let-stacks node) (ir-let-bank node))))
+                 (ir-match (dolist (branch (ir-match-branches node))
+                             (walk (ir-branch-body branch) owned)))
+                 (ir-catch (dolist (branch (ir-catch-branches node))
+                             (walk (ir-catch-branch-body branch) owned)))
+                 (ir-call (unless (or owned (ir-call-region node))
+                            (push node calls)))
+                 ((or ir-atom ir-prim ir-construct ir-foreign ir-throw ir-protect)))))
+      (when (eq (ir-def-kind def) :function)
+        (walk (ir-def-body def) (ir-def-pool def))))
+    calls))
+
 ;;; Handlers
 
 (defstruct (effects (:constructor make-effects ()))
@@ -425,6 +443,15 @@ them out, the region its cycle allocates in, and the stacks in use on entry."
   (destructuring-bind (&optional destination bank &rest growables) (gethash name *globals*)
     (clone-def name destination growables bank nil *global-busy*)))
 
+(defun keep-resets (def)
+  "Clear the reset of each call in DEF that is not a tail call: only a call that
+nothing follows may give back what its iteration built."
+  (let ((tail (tail-calls def)))
+    (walk-ir (lambda (node)
+               (when (and (ir-call-p node) (ir-call-reset node) (not (member node tail :test #'eq)))
+                 (setf (ir-call-reset node) nil)))
+             (ir-def-body def))))
+
 (defun assign-def (def clone destination growables bank region entry-busy)
   (let* ((cycle (gethash (ir-def-name def) *cycles*))
          (reached (reached-table def))
@@ -470,6 +497,8 @@ them out, the region its cycle allocates in, and the stacks in use on entry."
                               (when (set-difference busy entry-busy)
                                 (error "~s keeps a growable local across a call back into its recursive cycle: https://github.com/takeiteasy/sheaf/issues/17"
                                        (ir-def-name def)))
+                              (when (and region (member node (root-summary-bare-calls (gethash (ir-def-name def) *summaries*))))
+                                (setf (ir-call-reset copy) region))
                               (clone-def callee dest stacks call-bank region entry-busy))
                              (callee-cycle
                               (let* ((own-region (and (null dest) (cdr callee-cycle) (take-index busy)))
@@ -582,6 +611,7 @@ uses it."
                                        '()
                                        growables
                                        '()))
+      (keep-resets new)
       new)))
 
 (defun check-distinct (name indices)
@@ -625,7 +655,9 @@ stack below its stack count. Returns T."
                                  (check-distinct name (list* (ir-call-destination node) (ir-call-bank node)
                                                              (ir-call-growables node))))
                                (when (ir-call-region node)
-                                 (check-index (ir-call-region node) "a call's region")))
+                                 (check-index (ir-call-region node) "a call's region"))
+                               (when (ir-call-reset node)
+                                 (check-index (ir-call-reset node) "a call's reset")))
                       (ir-prim (cond ((ir-prim-bank node)
                                       (unless (eql (ir-prim-bank node) (ir-def-bank def))
                                         (error "~s: a growable value is built in a bank the def does not have" name)))

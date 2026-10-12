@@ -103,6 +103,7 @@ check the stores it leaves for them.
 | `root-summary-stores` | Each store the function makes of one parameter into another or into a global |
 | `root-summary-locals` | The roots of every name in the function |
 | `root-summary-reached` | The locals whose storage the result holds, which stack assignment builds in the caller's destinations |
+| `root-summary-bare-calls` | The calls whose arguments point only into parameters and globals, which may free their iteration's storage ([STACKS.md](STACKS.md#loops)) |
 
 ```lisp
 (define (put a r) (arr:set! a 0 r))   ; stores parameter 1 into parameter 0

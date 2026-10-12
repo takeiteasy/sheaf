@@ -51,7 +51,10 @@ storage, with no copy.
 How sizes and references are written in types is in [PRELUDE.md](PRELUDE.md).
 
 A recursive cycle builds everything in one region, owned by the call into the
-cycle and freed when it returns. Nothing is rejected for keeping a list across a
+cycle and freed when it returns. A tail call back into the cycle frees what its
+iteration built first, when its arguments point only into parameters and
+globals, so a loop that allocates on every iteration runs in bounded memory
+([STACKS.md](STACKS.md#loops)). Nothing is rejected for keeping a list across a
 recursive call, as Goose rejects it. A growable value kept across one is still
 rejected (see [Limitations](#limitations)).
 
@@ -70,9 +73,10 @@ linked by relative references.
 
 - Cells are linked by C pointers, not relative references:
   [#13](https://github.com/takeiteasy/sheaf/issues/13).
-- A loop that allocates on every iteration and never exits grows without
-  bound, and so does a cycle's region until the call into it returns:
-  [#2](https://github.com/takeiteasy/sheaf/issues/2).
+- A cycle's region grows until the call into it returns, unless a tail call
+  frees it each iteration: [#29](https://github.com/takeiteasy/sheaf/issues/29).
+- A loop that passes storage built in an iteration to the next keeps all of it:
+  [#30](https://github.com/takeiteasy/sheaf/issues/30).
 - A growable value kept across a call back into its recursive cycle is
   rejected: [#17](https://github.com/takeiteasy/sheaf/issues/17).
 

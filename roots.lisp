@@ -8,15 +8,16 @@
 (defvar *reference-types*)
 (defvar *here* nil "The location of the node being checked, for errors.")
 
-(defstruct (root-summary (:constructor make-root-summary (&key result stores locals reached)))
+(defstruct (root-summary (:constructor make-root-summary (&key result stores locals reached bare-calls)))
   "What a def does with the roots of its arguments. RESULT lists what its result
 may point into: a parameter index, `:global`, or `:fresh` for storage it builds
 in its caller's destinations. STORES lists the stores it leaves its caller to
 check, each a parameter index, the parameter index or `:global` it is stored
 into, and the chain of places that justifies it. LOCALS maps each name to its
 roots. REACHED lists the locals whose storage the result holds, which are built
-in the caller's destinations."
-  (result '()) (stores '()) (locals nil) (reached '()))
+in the caller's destinations. BARE-CALLS lists the calls whose arguments point
+only into parameters and globals."
+  (result '()) (stores '()) (locals nil) (reached '()) (bare-calls '()))
 
 ;; op, how it treats roots, and the arguments it uses
 (defparameter *prim-roots*
@@ -107,6 +108,7 @@ is true a store that no caller could make safe is an error."
          (links (make-hash-table :test 'eq))
          (locals (make-hash-table :test 'eq))
          (stores '())
+         (bare-calls '())
          (pending '())
          (branches '())
          (*here* (ir-def-location def)))
@@ -222,6 +224,9 @@ is true a store that no caller could make safe is an error."
                       (args (ir-call-args node))
                       (arg-roots (mapcar (lambda (arg) (walk arg env depth owner)) args))
                       (call-entry (entry (format nil "the call of ~a" (ir-call-function node)))))
+                 (when (every (lambda (roots) (every (lambda (root) (or (integerp root) (eq root :global))) roots))
+                              arg-roots)
+                   (push node bare-calls))
                  (loop :for (from into trail) :in (root-summary-stores summary)
                        :do (check-store (nth from arg-roots)
                                         (if (eq into :global) (list :global) (nth into arg-roots))
@@ -330,7 +335,8 @@ REPORT is true, notes that they must not outlive what BODY frees."
         (make-root-summary :result (nreverse result)
                            :stores (reverse stores)
                            :locals locals
-                           :reached reached)))))
+                           :reached reached
+                           :bare-calls bare-calls)))))
 
 (defun root-summaries (lowered &key report)
   "A table from the name of each def in LOWERED to its `root-summary`. When

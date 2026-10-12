@@ -550,24 +550,6 @@ that save the marks."
           (:return ,(var result))))
       `((:return ,expression))))
 
-(defun tail-calls (def)
-  "The calls in tail position of DEF that nothing needs to be given back after,
-which `emit-node` can turn into jumps."
-  (let ((calls '()))
-    (labels ((walk (node owned)
-               (etypecase node
-                 (ir-let (walk (ir-let-body node) (or owned (ir-let-stacks node) (ir-let-bank node))))
-                 (ir-match (dolist (branch (ir-match-branches node))
-                             (walk (ir-branch-body branch) owned)))
-                 (ir-catch (dolist (branch (ir-catch-branches node))
-                             (walk (ir-catch-branch-body branch) owned)))
-                 (ir-call (unless (or owned (ir-call-region node))
-                            (push node calls)))
-                 ((or ir-atom ir-prim ir-construct ir-foreign ir-throw ir-protect)))))
-      (when (eq (ir-def-kind def) :function)
-        (walk (ir-def-body def) (ir-def-pool def))))
-    calls))
-
 (defun find-tail-cycles (defs)
   "Fill `*def-tail-calls*` with the calls of each def in DEFS that jump to a def
 in its own cycle of tail calls, and `*def-cycle*` with each def's cycle, the
@@ -597,6 +579,8 @@ names of the defs that tail call each other."
           ,@(loop :for (nil name) :in params
                   :for temp :in temps
                   :collect `(:assign ,(var name) ,(var temp)))
+          ,@(when (ir-call-reset node)
+              `((:assign (:dot ,(stack-node (ir-call-reset node)) "top") ,(var "iter_mark"))))
           (:goto ,label))))))
 
 (defun pattern-code (pattern access)
@@ -825,6 +809,13 @@ in the frame, which then goes on unwinding."
   (loop :for (symbol . type) :in (ir-def-params def)
         :collect (list (c-type type) (fresh-c-name symbol))))
 
+(defun resetting-stack ()
+  "The stack a tail call being emitted resets, which the body saves at each iteration's start."
+  (block found
+    (dolist (call *tail-calls*)
+      (when (ir-call-reset call)
+        (return-from found (ir-call-reset call))))))
+
 (defun emit-body (def params)
   "The statements of DEF's body once PARAMS, its C parameters, hold the arguments.
 A value stores its result in the static `value`."
@@ -837,6 +828,9 @@ A value stores its result in the static `value`."
     (append
      (when *releases*
        `((:decl (:ptr (:name "char")) "pool_mark" (:dot ,(stack-node (ir-def-pool def)) "top") :unused t)))
+     (let ((reset (resetting-stack)))
+       (when reset
+         `((:decl (:ptr (:name "char")) "iter_mark" (:dot ,(stack-node reset) "top") :unused t))))
      (cond ((eq (ir-def-kind def) :value)
             (append (emit-node (ir-def-body def) "value" env)
                     (emit-releases *releases*)

@@ -154,3 +154,15 @@ and exit code."
 
 (test clones-are-named-in-comments
   (is (search "// PAIR<" (sheaf:emit-c (assigned "stacks")))))
+
+(defun big-loops ()
+  (sheaf:assign-stacks (lowered-from "loops" "BIG")))
+
+(test a-loop-that-resets-runs-in-a-small-stack
+  (is (= 15850 (c-result "loops")))
+  (is (= 1500008500000
+         (parse-integer (run-c (big-loops) "-DSHEAF_STACK_SIZE=4096")))))
+
+(test a-resetting-tail-call-gives-its-stack-back-before-it-jumps
+  (is (nodes-of (sheaf:c-program (big-loops)) :goto))
+  (is (search "iter_mark" (with-output-to-string (out) (sheaf:emit-c (big-loops) out)))))

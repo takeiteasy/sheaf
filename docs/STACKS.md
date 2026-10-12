@@ -70,6 +70,23 @@ A cycle allocates in one region and frees it when the call into the cycle
 returns. The region is the destination of the call into the cycle, or a stack
 that call takes for itself when the result holds no storage[^region].
 
+## Loops
+
+A tail call back into its own cycle frees what its iteration built before it
+jumps, so a loop that allocates on every iteration runs in bounded memory. It
+does when its arguments point only into parameters and globals[^bare]:
+
+```lisp
+(define (scratch-loop n acc)                     ; each iteration's list is freed
+  (if (== n 0)
+      acc
+      (scratch-loop (- n 1) (+ acc (total (Cons n (Cons 1 Nil)))))))
+(define (build n acc)                            ; acc holds what the iteration built
+  (if (== n 0) acc (build (- n 1) (Cons n acc))))
+```
+
+A call that carries what it built keeps the region, as `build` does.
+
 ## Banks
 
 A cycle that builds a growable value at every level, such as `vectors-down`,
@@ -100,6 +117,7 @@ VECTORS-DOWN<UFIX → LIST (VECTOR UFIX)>{12}[dest 1 bank 2 busy 0 1 2]
 | `ir-call-growables` | The stacks the growable values of a result are built on |
 | `ir-call-bank` | The bank a result's growable values are built from |
 | `ir-call-region` | A region the call takes and frees |
+| `ir-call-reset` | The region a tail call frees back to where its iteration began |
 | `ir-let-stacks` | The stacks the growable values a `let` binds own |
 | `ir-let-bank` | The bank a `let` owns for a result it drops |
 | `ir-prim-bank` | The bank a growable value takes its stack from |
@@ -124,8 +142,13 @@ freed.
 
 - In C a bank holds about 32,000 growable values at a time
   ([EMITTER.md](EMITTER.md#banks)).
-- A cycle keeps what it allocates until the call into it returns:
-  [#2](https://github.com/takeiteasy/sheaf/issues/2).
+- A cycle keeps what it allocates until the call into it returns, unless a
+  tail call frees it each iteration:
+  [#29](https://github.com/takeiteasy/sheaf/issues/29).
+- A loop that passes storage built in an iteration to the next keeps all of it:
+  [#30](https://github.com/takeiteasy/sheaf/issues/30).
+- A loop in a bank keeps the slices it takes each iteration:
+  [#31](https://github.com/takeiteasy/sheaf/issues/31).
 - A growable local live across a call back into its own cycle is an error:
   [#17](https://github.com/takeiteasy/sheaf/issues/17).
 
@@ -147,6 +170,10 @@ freed.
     bank's owner ends. `compute-placements` marks a cycle banked when its
     growable count would grow with the recursion, and a def that reaches a
     banked call is banked too. C hands out slices of one reservation ([EMITTER.md](EMITTER.md#banks)).
+[^bare]: `root-summary-bare-calls` lists them. A tail call that jumps saves the
+    region's top when the iteration starts and restores it before the jump
+    ([EMITTER.md](EMITTER.md#calls)); the interpreter frees the cells above
+    the mark, so a later read of one is an error.
 [^region]: A cycle of functions whose results hold no storage and that build
     no cells or arrays takes no region. Growable values go on stacks of their
     own, so a cycle that builds only those takes none either.

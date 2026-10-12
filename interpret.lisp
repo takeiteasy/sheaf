@@ -70,6 +70,18 @@ that owner took it, and the cells pushed since."
 (defvar *handlers* '()
   "The catches being evaluated, innermost first, each its node, environment and tag.")
 
+(defvar *iteration-marks* '()
+  "What each stack a call in the running def resets held when the def was entered.")
+
+(defun resetting-stacks (def)
+  "The stacks the calls in DEF reset."
+  (let ((stacks '()))
+    (walk-ir (lambda (node)
+               (when (and (ir-call-p node) (ir-call-reset node))
+                 (pushnew (ir-call-reset node) stacks)))
+             (ir-def-body def))
+    stacks))
+
 (defun run-lowered (lowered)
   "Evaluate the root of LOWERED, a function of no arguments or a value. Raw Lisp
 cannot be evaluated: https://github.com/takeiteasy/sheaf/issues/3
@@ -287,7 +299,10 @@ stacks and banks it saves, each with what it held on entry."
                               (second args))
                         (unit)))))))
              (enter (def env)
-               (let ((pool (ir-def-pool def)))
+               (let ((pool (ir-def-pool def))
+                     (*iteration-marks* (and stacks
+                                             (loop :for index :in (resetting-stacks def)
+                                                   :collect (cons index (stack-items (stack index)))))))
                  (when pool (claim pool))
                  (let ((value (unwind-protect (evaluate (ir-def-body def) env)
                                 (when pool (release pool)))))
@@ -316,7 +331,10 @@ stacks and banks it saves, each with what it held on entry."
                          (env (loop :for (name) :in (ir-def-params def)
                                     :for arg :in (ir-call-args node)
                                     :collect (cons name (evaluate arg env))))
-                         (region (ir-call-region node)))
+                         (region (ir-call-region node))
+                         (reset (ir-call-reset node)))
+                    (when (and stacks reset)
+                      (give-back-since (list (list :stack reset (cdr (assoc reset *iteration-marks*))))))
                     (when region (claim region))
                     (unwind-protect (enter def env)
                       (when region (release region)))))
